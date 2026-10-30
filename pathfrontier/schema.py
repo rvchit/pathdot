@@ -8,8 +8,9 @@ Embedding cache convention: cache/emb_<encoder>_<dataset>_<split>.npy  (+ _label
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Iterable, Iterator, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,7 +54,7 @@ class Prediction(BaseModel):
     routed_to: str | None = None       # for cascade: which stage made the final call
     extra: dict = Field(default_factory=dict)
 
-    def model_post_init(self, __context) -> None:  # noqa: D401
+    def model_post_init(self, context, /) -> None:
         if self.confidence is None:
             self.confidence = max(self.y_prob) if self.y_prob else None
 
