@@ -1,0 +1,54 @@
+# Full demo stack with zero AWS:  docker compose up --build
+#   frontend  http://localhost:4000   (nginx serving the Vite build)
+#   backend   http://localhost:4001   (Express: tiles, comments, /ml proxy)
+#   ml        http://localhost:8008   (FastAPI pathfrontier.serve)
+# Tiles/results/cache/data are bind-mounted from the repo so `make tile` output is visible.
+services:
+  ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    ports:
+      - "8008:8008"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PATHFRONTIER_TILES_DIR: /app/tiles
+      PATHFRONTIER_DATA_DIR: /app/data
+      PATHFRONTIER_CACHE_DIR: /app/cache
+      PATHFRONTIER_RESULTS_DIR: /app/results
+    volumes:
+      - ./tiles:/app/tiles
+      - ./results:/app/results
+      - ./cache:/app/cache
+      - ./data:/app/data
+
+  backend:
+    build: ./cello/backend
+    ports:
+      - "4001:4001"
+    environment:
+      PORT: "4001"
+      STORAGE_MODE: local
+      TILES_DIR: /srv/tiles
+      DATA_DIR: /srv/data
+      UPLOAD_DIR: /srv/data/slides
+      ML_SERVICE_URL: http://ml:8008
+      CORS_ORIGIN: "*"
+    volumes:
+      - ./tiles:/srv/tiles
+      - ./data:/srv/data
+    depends_on:
+      - ml
+
+  frontend:
+    build:
+      context: ./cello/frontend
+      args:
+        # The browser talks to the backend directly, so this must be reachable from the host.
+        VITE_BACKEND_URL: http://localhost:4001
+    ports:
+      - "4000:80"
+    depends_on:
+      - backend

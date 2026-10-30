@@ -1,0 +1,55 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+
+// User model remains the same, but now users can be linked to images
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relation to Image model (1 User can have many Images)
+  images    Image[]
+}
+
+// Image model to store metadata related to images being edited/annotated
+model Image {
+  id          Int      @id @default(autoincrement())
+  filename    String
+  url         String   @unique         // Image location (S3 URL or local path)
+  size        Int                      // Size in bytes
+  format      String                   // e.g., JPEG, PNG
+  annotations Json?                    // Optional: Store annotations as JSON
+  status      ImageStatus @default(NEW) // Status of the image (edited, annotated, etc.)
+  uploadedAt  DateTime   @default(now()) // When the image was uploaded
+  editedAt    DateTime?                 // Timestamp for the last edit (optional)
+  
+  // Relation to User model (many Images can belong to 1 User)
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+
+  // For any other related data, can add more fields here.
+}
+
+// Enum to track the status of the image
+enum ImageStatus {
+  NEW       // New image uploaded but not yet annotated or edited
+  EDITED    // Image has been edited
+  ANNOTATED // Image has been annotated
+}
+

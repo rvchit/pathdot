@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    /* Incremental build */
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo",  // Custom location for build info file
+
+    /* Target modern ECMAScript features */
+    "target": "ES2022",
+
+    /* Specify the lib to include standard DOM and ES2023 APIs */
+    "lib": ["DOM", "ES2023"],
+
+    /* Module system compatible with ES modules and bundlers like Vite */
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+
+    /* JSX and React settings */
+    "jsx": "react-jsx",
+
+    /* TypeScript linting options */
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Paths and resolution */
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+
+    /* No emit since this is for a Vite project */
+    "noEmit": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

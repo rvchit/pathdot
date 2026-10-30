@@ -1,0 +1,28 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.env
+
+# node
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+*.log
+.DS_Store
+
+# large / regenerable artifacts (see GUIDE.md: make tile, scripts/download_data.py, scripts/embed.py)
+data/*
+cache/*
+tiles/*
+results/*
+!results/demo/
+results/demo/*.jsonl
+!results/.gitkeep
+!tiles/.gitkeep
+!data/.gitkeep
+!cache/.gitkeep

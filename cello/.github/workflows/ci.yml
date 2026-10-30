@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Works both when this workflow lives in the cello repo (frontend/, backend/ at the root)
+# and when it is lifted to the pathfrontier monorepo root (cello/frontend, cello/backend).
+jobs:
+  node:
+    name: ${{ matrix.package }} lint + build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate package
+        id: loc
+        run: |
+          if [ -d "cello/${{ matrix.package }}" ]; then echo "dir=cello/${{ matrix.package }}" >> "$GITHUB_OUTPUT"; else echo "dir=${{ matrix.package }}" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ steps.loc.outputs.dir }}/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: ${{ steps.loc.outputs.dir }}
+
+      - run: npm run lint
+        working-directory: ${{ steps.loc.outputs.dir }}
+
+      - run: npm run build
+        working-directory: ${{ steps.loc.outputs.dir }}
+
+  python:
+    name: pathfrontier pytest
+    runs-on: ubuntu-latest
+    # Only meaningful at the monorepo root where pyproject.toml lives.
+    if: ${{ hashFiles('pyproject.toml') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install (CPU torch, then the package with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+
+      - run: pytest
