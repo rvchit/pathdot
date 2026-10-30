@@ -14,7 +14,8 @@ Configuration (environment):
     PATHFRONTIER_TILES_DIR   local DZI pyramids (default tiles/)
     PATHFRONTIER_VLM_MODEL   optional Fireworks model id; used for the uncertain band only when
                              FIREWORKS_API_KEY is also set, otherwise band tiles -> "pathologist"
-    PATHFRONTIER_LOW/HIGH    cascade thresholds (defaults 0.05 / 0.95)
+    PATHFRONTIER_LOW/HIGH    cascade thresholds (defaults 0.01 / 0.90)
+    PATHFRONTIER_BG_SAT      mean HSV saturation below which a tile is glass/background (default 0.04)
     PATHFRONTIER_FAKE=1      "fake" encoder + deterministic random probe-like scorer, no downloads
     PATHFRONTIER_VLM_MAX_TILES  cap on VLM calls per slide job (default 200)
 
@@ -50,7 +51,7 @@ from pathfrontier.schema import CLASSES, DEFAULT_COST_PER_1K, POSITIVE_INDEX, sa
 log = logging.getLogger("pathfrontier.serve")
 
 PROBE_COST_PER_TILE = DEFAULT_COST_PER_1K["probe"] / 1000.0
-BACKGROUND_SAT_THRESHOLD = 0.06   # mean HSV saturation (0..1) below this => no tissue
+BACKGROUND_SAT_THRESHOLD = float(os.getenv("PATHFRONTIER_BG_SAT", "0.04"))  # mean HSV saturation below this => glass
 BACKGROUND_VAL_THRESHOLD = 0.80   # ...and mean brightness above this (white glass)
 EMBED_BATCH = 64
 
@@ -66,8 +67,8 @@ class Settings:
     tiles_dir: Path = field(default_factory=lambda: config.ROOT / "tiles")
     results_dir: Path = field(default_factory=lambda: config.RESULTS_DIR)
     vlm_model: str | None = None
-    low: float = 0.05
-    high: float = 0.95
+    low: float = 0.01
+    high: float = 0.90
     fake: bool = False
     vlm_max_tiles: int = 200
 
@@ -85,8 +86,8 @@ class Settings:
             tiles_dir=Path(os.getenv("PATHFRONTIER_TILES_DIR", config.ROOT / "tiles")),
             results_dir=config.RESULTS_DIR,
             vlm_model=os.getenv("PATHFRONTIER_VLM_MODEL") or None,
-            low=float(os.getenv("PATHFRONTIER_LOW", "0.05")),
-            high=float(os.getenv("PATHFRONTIER_HIGH", "0.95")),
+            low=float(os.getenv("PATHFRONTIER_LOW", "0.01")),
+            high=float(os.getenv("PATHFRONTIER_HIGH", "0.90")),
             fake=fake,
             vlm_max_tiles=int(os.getenv("PATHFRONTIER_VLM_MAX_TILES", "200")),
         )

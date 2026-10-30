@@ -13,6 +13,9 @@ from pathlib import Path
 import joblib
 import numpy as np
 from sklearn.isotonic import IsotonicRegression
+
+RAW_BLEND = 0.02   # weight of the raw logistic probability mixed into the calibrated one
+PROB_EPS = 1e-6    # calibrated probabilities are clipped to [eps, 1-eps]
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -105,13 +108,18 @@ class LinearProbe:
         p = raw.copy()
         for k, iso in self.calibrators.items():
             p[:, k] = iso.predict(raw[:, k])
+        # Isotonic maps are step functions: they collapse many tiles onto a few values and can
+        # emit exact 0/1, which destroys the ranking a cascade threshold sweep relies on
+        # (observed on PCam test: 127 tumor tiles at p == 0). Blend a small amount of the raw
+        # logistic probability back in so ties break monotonically, and keep away from 0/1.
+        p = (1.0 - RAW_BLEND) * p + RAW_BLEND * raw
         if self.n_classes == 2:
             k = self.n_classes - 1
             p[:, 0] = 1.0 - p[:, k]
         else:
             s = p.sum(axis=1, keepdims=True)
             p = np.where(s > 0, p / np.maximum(s, 1e-12), raw)
-        return np.clip(p, 0.0, 1.0)
+        return np.clip(p, PROB_EPS, 1.0 - PROB_EPS)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         return self.predict_proba(X).argmax(axis=1)

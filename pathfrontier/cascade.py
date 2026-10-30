@@ -27,7 +27,7 @@ from pathfrontier.schema import POSITIVE_INDEX, Prediction
 
 Fallback = Literal["vlm_ft", "pathologist", "none"]
 
-DEFAULT_LOWS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.3)
+DEFAULT_LOWS = (0.0001, 0.0003, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3)
 DEFAULT_HIGHS = (0.7, 0.8, 0.9, 0.95, 0.98, 0.99)
 PROBE_ALONE = (0.5, 0.5)  # degenerate band: stage 1 decides everything
 

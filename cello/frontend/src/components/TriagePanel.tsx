@@ -17,8 +17,8 @@ const fmtMs = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math
 const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
 
 const TriagePanel: React.FC<Props> = ({ imageId, heatmap, onHeatmap, overlay, onOverlay, hasGroundTruth }) => {
-  const [low, setLow] = useState(0.05);
-  const [high, setHigh] = useState(0.95);
+  const [low, setLow] = useState(0.01);
+  const [high, setHigh] = useState(0.9);
   const [fallback, setFallback] = useState<Fallback>("vlm_ft");
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -111,8 +111,8 @@ const TriagePanel: React.FC<Props> = ({ imageId, heatmap, onHeatmap, overlay, on
 
       <div className="field-row">
         <label>
-          auto-clear below <strong>{low.toFixed(2)}</strong>
-          <input type="range" min={0} max={0.5} step={0.01} value={low} onChange={(e) => setLow(Math.min(Number(e.target.value), high - 0.01))} disabled={running} />
+          auto-clear below <strong>{low.toFixed(3)}</strong>
+          <input type="range" min={0} max={0.2} step={0.001} value={low} onChange={(e) => setLow(Math.min(Number(e.target.value), high - 0.01))} disabled={running} />
         </label>
         <label>
           auto-flag above <strong>{high.toFixed(2)}</strong>

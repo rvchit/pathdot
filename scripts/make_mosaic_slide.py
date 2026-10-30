@@ -74,10 +74,13 @@ def load_records(dataset: str, n: int, seed: int, synthetic: bool) -> list:
     return load_split(dataset, "test", limit=n, seed=seed)
 
 
-def build_mosaic(records: list, grid: int):
+def build_mosaic(records: list, grid: int, cell_px: int | None = None):
+    """Stitch records into a grid. ``cell_px`` resizes every tile to that size (default: native
+    tile size). Using 256 makes each full-resolution DZI tile coincide with exactly one cell, so
+    the heatmap and the ground-truth overlay line up 1:1 in the viewer."""
     from PIL import Image
 
-    tile_px = records[0].image.width
+    tile_px = cell_px or records[0].image.width
     canvas = Image.new("RGB", (grid * tile_px, grid * tile_px), (255, 255, 255))
     cells = []
     for i in range(grid * grid):
@@ -101,6 +104,8 @@ def main(
     synthetic: Annotated[bool, typer.Option("--synthetic", help="use make_synthetic (offline)")] = False,
     image_id: Annotated[str | None, typer.Option(help="override id (default <dataset>_mosaic_<grid>)")] = None,
     no_tile: Annotated[bool, typer.Option("--no-tile", help="skip the DZI step")] = False,
+    cell_px: Annotated[int, typer.Option(help="resize each tile to this many px (0 = native). "
+                                             "256 aligns cells with full-res DZI tiles")] = 256,
 ):
     out_dir = out_dir or (config.DATA_DIR / "slides")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -114,7 +119,7 @@ def main(
     if len(records) < n:
         typer.echo(f"only {len(records)} tiles available; cells will repeat")
 
-    canvas, tile_px, cells = build_mosaic(records, grid)
+    canvas, tile_px, cells = build_mosaic(records, grid, cell_px or None)
     png = out_dir / f"{image_id}.png"
     canvas.save(png, "PNG")
     gt = {

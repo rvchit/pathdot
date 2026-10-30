@@ -92,7 +92,7 @@ def test_unseen_class_gets_zero_probability():
     probe = LinearProbe("fake", "crc").fit(X, y)
     p = probe.predict_proba(X)
     assert p.shape == (300, 9)
-    assert np.allclose(p[:, 3:], 0.0)
+    assert np.all(p[:, 3:] < 1e-4)  # clipped to PROB_EPS, never exactly zero
 
 
 def test_bad_inputs():
