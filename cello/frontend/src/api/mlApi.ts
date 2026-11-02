@@ -81,6 +81,8 @@ export interface MlHealth {
   vlm?: string | null;
   /** PathVQA assistant model id, or null when the /vqa endpoint is not configured. */
   vqa?: string | null;
+  /** Model id used by POST /scan (demo gallery), or null when not configured. */
+  scan_model?: string | null;
   device?: string;
 }
 
@@ -157,4 +159,82 @@ export async function runSlideTriage(
     if (status.status === "done" && status.result) return status.result;
     if (status.status === "error") throw new Error(status.error ?? status.detail ?? "ML job failed");
   }
+}
+
+/* ---------- demo gallery (/demo page) ---------- */
+
+export interface GalleryQuestion {
+  question: string;
+  answer: string;
+  qtype: "closed" | "open";
+}
+
+export interface GalleryScanItem {
+  id: string;
+  section: "scan";
+  label: 0 | 1;
+  label_name: string;
+  source: string;
+  meta: Record<string, unknown>;
+  /** Relative to the ML service; browser URL = `${BACKEND_URL}/ml${image_url}`. */
+  image_url: string;
+}
+
+export interface GalleryAskItem {
+  id: string;
+  section: "ask";
+  image_url: string;
+  questions: GalleryQuestion[];
+  meta: Record<string, unknown>;
+}
+
+export interface Gallery {
+  scan: GalleryScanItem[];
+  ask: GalleryAskItem[];
+}
+
+export interface ScanOpinion {
+  verdict: "tumor" | "normal";
+  p_tumor: number;
+  latency_ms: number;
+  model: string;
+}
+
+export interface ScanResult {
+  id: string;
+  verdict: "tumor" | "normal";
+  p_tumor: number;
+  confidence: number;
+  decided_by: "vlm" | "probe";
+  model: string;
+  latency_ms: number;
+  cost_usd: number;
+  truth: { label: 0 | 1; label_name: string };
+  probe: ScanOpinion | null;
+  vlm: (ScanOpinion & { answer: string; cost_usd: number }) | { error: string } | null;
+  cached: boolean;
+}
+
+export interface GalleryVqaResponse {
+  answer: string;
+  question: string;
+  model: string;
+  latency_ms: number;
+  cost_usd: number;
+  cached?: boolean;
+}
+
+export async function getGallery(): Promise<Gallery> {
+  const { data } = await api.get<Gallery>("/ml/gallery", { timeout: 10_000 });
+  return data;
+}
+
+export async function scanTile(id: string): Promise<ScanResult> {
+  const { data } = await api.post<ScanResult>("/ml/scan", { id }, { timeout: 90_000 });
+  return data;
+}
+
+export async function askGallery(gallery_id: string, question: string): Promise<GalleryVqaResponse> {
+  const { data } = await api.post<GalleryVqaResponse>("/ml/vqa", { gallery_id, question }, { timeout: 90_000 });
+  return data;
 }

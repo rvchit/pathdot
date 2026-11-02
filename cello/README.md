@@ -166,3 +166,16 @@ Replace it with `pcam_mosaic_24` + the real service after the demo run._
 
 - Kaushik Karthikeyan
 - Rachit Bisht
+
+## Demo gallery (`/demo`)
+
+Judge-facing page at `http://localhost:4000/demo` (`frontend/src/components/DemoPage.tsx`), linked from the
+viewer sidebar ("Demo gallery →"). Two stacked sections driven by the ML service through the `/ml` proxy:
+
+1. **Tumor scan** — `GET /ml/gallery` (`scan[]`), click a tile → `POST /ml/scan {"id"}` → verdict badge,
+   confidence, decided-by (fine-tuned Qwen3.5-9B VLM vs Phikon-v2 probe), both opinions, then ground truth.
+2. **Ask the pathology assistant** — `GET /ml/gallery` (`ask[]`), click an image → its PathVQA questions as
+   chips (or free text) → `POST /ml/vqa {"gallery_id","question"}` → answer vs expected dataset answer.
+
+Gallery images are fetched at `${BACKEND_URL}/ml${image_url}`. The health pill reads `vqa` and `scan_model`
+from `GET /ml/health`; `vqa: null` or a 503 from `/ml/vqa` shows the "Assistant unavailable" state.

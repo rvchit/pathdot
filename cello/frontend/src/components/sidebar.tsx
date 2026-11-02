@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import FileUpload from "./FileUpload";
 import Comments from "./comments";
 import TriagePanel from "./TriagePanel";
@@ -30,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedImageId, onImageSelect, heatm
           <div className="brand-name">Cello</div>
           <div className="brand-tag">AI slide triage</div>
         </div>
+        <Link to="/demo" className="brand-link">Demo gallery →</Link>
       </div>
       <FileUpload selectedImageId={selectedImageId} onImageSelect={onImageSelect} />
       <ImpactStrip summary={heatmap?.summary ?? null} history={askHistory} />

@@ -35,3 +35,6 @@ pathvqa_kit/data/
 pathvqa_kit/fireworks/
 pathvqa_kit/fireworks_small/
 pathvqa_kit/**/__pycache__/
+
+# demo gallery is small and curated: keep it in git
+!data/demo_gallery/

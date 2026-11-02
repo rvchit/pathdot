@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import time
 from pathlib import Path
 
@@ -335,3 +336,141 @@ def test_vlm_classify_prompt_version(env, monkeypatch):
     s = serve.Settings.from_env()
     assert s.vlm_prompt_version == "v2" and s.vlm_no_thinking is False
     assert s.vqa_model == "acct/models/x"
+
+
+# --------------------------------------------------------------------------------------
+# Demo gallery: /gallery, /gallery/image, /scan, /vqa {gallery_id}
+# --------------------------------------------------------------------------------------
+def make_gallery(root: Path) -> Path:
+    """Tiny manifest + images in the layout scripts/make_demo_gallery.py writes."""
+    gdir = root / "demo_gallery"
+    gdir.mkdir()
+    scan = []
+    for i, label in enumerate((1, 1, 0), 1):
+        tissue_image(224, 224, seed=10 + i).save(gdir / f"scan_{i}.png")
+        scan.append({"id": f"scan_{i}", "section": "scan", "label": label,
+                     "label_name": "tumor" if label else "normal", "source": "camelyon17",
+                     "meta": {"tile_id": f"camelyon17:test:{i}", "slide": 20 + i, "key": f"k{i}"},
+                     "file": f"scan_{i}.png"})
+    tissue_image(300, 200, seed=7).save(gdir / "ask_1.jpg", "JPEG")
+    ask = [{"id": "ask_1", "section": "ask", "file": "ask_1.jpg",
+            "questions": [{"question": "what does this image show?", "answer": "kidney",
+                           "qtype": "open"},
+                          {"question": "is kidney present?", "answer": "yes", "qtype": "closed"}],
+            "meta": {"image_path": "../data/images/pathvqa/x.jpg"}}]
+    (gdir / "manifest.json").write_text(json.dumps(
+        {"version": 1, "source": "camelyon17", "scan": scan, "ask": ask}))
+    return gdir
+
+
+@pytest.fixture(scope="module")
+def gallery_client(env, tmp_path_factory):
+    root = tmp_path_factory.mktemp("gallery")
+    gdir = make_gallery(root)
+    settings = serve.Settings(fake=True, encoder="fake", tiles_dir=env["tiles"],
+                              results_dir=root / "results", gallery_dir=gdir)
+    with TestClient(serve.create_app(settings)) as c:
+        yield c
+
+
+def test_gallery_listing_and_images(gallery_client):
+    r = gallery_client.get("/gallery")
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert [it["id"] for it in j["scan"]] == ["scan_1", "scan_2", "scan_3"]
+    assert [it["id"] for it in j["ask"]] == ["ask_1"]
+    assert j["scan"][0]["image_url"] == "/gallery/image/scan_1"
+    assert j["scan"][0]["label"] == 1 and j["scan"][2]["label_name"] == "normal"
+    assert j["ask"][0]["questions"][1]["qtype"] == "closed"
+
+    png = gallery_client.get("/gallery/image/scan_1")
+    assert png.status_code == 200 and png.headers["content-type"] == "image/png"
+    assert Image.open(io.BytesIO(png.content)).size == (224, 224)
+    jpg = gallery_client.get("/gallery/image/ask_1")
+    assert jpg.status_code == 200 and jpg.headers["content-type"] == "image/jpeg"
+    assert gallery_client.get("/gallery/image/nope").status_code == 404
+
+    h = gallery_client.get("/health").json()
+    assert h["gallery"] == {"scan": 3, "ask": 1} and h["scan_model"] is None
+
+
+def test_scan_fake_agrees_with_truth(gallery_client):
+    seen = {}
+    for sid, label in (("scan_1", 1), ("scan_2", 1), ("scan_3", 0)):
+        r = gallery_client.post("/scan", json={"id": sid})
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert set(j) >= {"id", "verdict", "p_tumor", "confidence", "decided_by", "model",
+                          "latency_ms", "cost_usd", "truth", "probe", "vlm", "cached"}
+        assert j["id"] == sid and j["cached"] is False
+        assert j["truth"] == {"label": label, "label_name": "tumor" if label else "normal"}
+        assert j["verdict"] == j["truth"]["label_name"]      # fake scorer agrees with truth
+        assert j["decided_by"] == "probe" and j["vlm"] is None
+        assert 0.0 <= j["p_tumor"] <= 1.0 and 0.5 <= j["confidence"] <= 1.0
+        assert j["probe"]["verdict"] == j["verdict"] and j["probe"]["p_tumor"] == j["p_tumor"]
+        seen[sid] = j["p_tumor"]
+    assert len(set(seen.values())) == 3                       # deterministic but distinct per id
+    r2 = gallery_client.post("/scan", json={"id": "scan_1"})
+    assert r2.json()["cached"] is True and r2.json()["p_tumor"] == seen["scan_1"]
+    assert gallery_client.post("/scan", json={"id": "ask_1"}).status_code == 400
+    assert gallery_client.post("/scan", json={"id": "missing"}).status_code == 404
+
+
+def test_scan_vlm_path_monkeypatched(env, tmp_path, monkeypatch):
+    """A configured scan model decides via prompt-v2 logprobs; a VLM error falls back to probe."""
+    gdir = make_gallery(tmp_path)
+    calls = []
+
+    def fake_vlm(image, model, api_key, cutoff):
+        calls.append((model, api_key, cutoff, image.size))
+        if len(calls) > 1:
+            raise RuntimeError("deployment gone")
+        return {"verdict": "tumor" if 0.3 >= cutoff else "normal", "p_tumor": 0.3,
+                "answer": "tumor", "latency_ms": 12.0, "cost_usd": 1e-4, "model": model,
+                "cutoff": cutoff}
+
+    monkeypatch.setattr(serve, "_scan_vlm", fake_vlm)
+    settings = serve.Settings(fake=True, encoder="fake", tiles_dir=env["tiles"],
+                              results_dir=tmp_path / "results", gallery_dir=gdir,
+                              scan_model="acct/models/c17#acct/deployments/d1",
+                              scan_api_key="k", scan_cutoff=0.1068)
+    eng = serve.gallery.ScanEngine(settings, lambda: None)
+    assert not eng.vlm_enabled()                               # fake mode never calls the VLM
+    settings.fake = False
+    eng = serve.gallery.ScanEngine(settings, lambda: None)
+    assert eng.vlm_enabled() and eng.cutoff == 0.1068
+    item = {"id": "scan_1", "label": 1, "label_name": "tumor"}
+    monkeypatch.setattr(eng, "probe_scan", lambda it, im: {"verdict": "normal", "p_tumor": 0.2,
+                                                           "latency_ms": 1.0, "model": "probe/x"})
+    im = tissue_image(224, 224)
+    j = eng.scan(item, im, vlm_fn=serve._scan_vlm)
+    assert calls[0][:3] == ("acct/models/c17#acct/deployments/d1", "k", 0.1068)
+    assert j["decided_by"] == "vlm" and j["verdict"] == "tumor" and j["p_tumor"] == 0.3
+    assert j["model"] == settings.scan_model and j["cost_usd"] == 1e-4
+    assert j["latency_ms"] == 13.0 and j["probe"]["verdict"] == "normal"
+    j2 = eng.scan(item, im, vlm_fn=serve._scan_vlm)
+    assert j2["decided_by"] == "probe" and j2["verdict"] == "normal"
+    assert "deployment gone" in j2["vlm"]["error"]
+
+
+def test_vqa_with_gallery_id(gallery_client):
+    body = {"gallery_id": "ask_1", "question": "is kidney present?"}
+    r = gallery_client.post("/vqa", json=body)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["answer"] in {"yes", "no"} and j["gallery_id"] == "ask_1"
+    assert j["image_id"] is None and j["cached"] is False and j["model"] == "fake/vqa"
+    assert gallery_client.post("/vqa", json=body).json()["cached"] is True
+    r2 = gallery_client.post("/vqa", json={"gallery_id": "scan_1", "question": "is it tumor?"})
+    assert r2.status_code == 200 and r2.json()["cached"] is False
+    assert gallery_client.post("/vqa", json={"gallery_id": "nope", "question": "q?"}).status_code == 404
+
+
+def test_gallery_missing_404(env, tmp_path):
+    settings = serve.Settings(fake=True, encoder="fake", tiles_dir=env["tiles"],
+                              results_dir=tmp_path / "results", gallery_dir=tmp_path / "none")
+    with TestClient(serve.create_app(settings)) as c:
+        r = c.get("/gallery")
+        assert r.status_code == 404 and "make_demo_gallery.py" in r.json()["detail"]
+        assert c.post("/scan", json={"id": "scan_1"}).status_code == 404
+        assert c.get("/health").json()["gallery"] == {"scan": 0, "ask": 0}

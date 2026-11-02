@@ -7,6 +7,10 @@
     GET  /heatmap/{image_id}
     POST /vqa               JSON {"image_id", "level"|null, "x", "y", "question"}
                             or   {"image_b64", "question"}  (PathVQA fine-tune, see vqa.py)
+                            or   {"gallery_id", "question"} (image from the demo gallery)
+    GET  /gallery           curated demo items (scripts/make_demo_gallery.py; see gallery.py)
+    GET  /gallery/image/{id}
+    POST /scan              JSON {"id": "scan_1"}: probe + separate fine-tuned VLM verdicts
 
 Configuration (environment):
 
@@ -28,6 +32,11 @@ Configuration (environment):
     PATHFRONTIER_FAKE=1      "fake" encoder + deterministic random probe-like scorer, no downloads;
                              /vqa answers offline with a canned answer
     PATHFRONTIER_VLM_MAX_TILES  cap on VLM calls per slide job (default 200)
+    PATHFRONTIER_GALLERY_DIR     demo gallery dir (default data/demo_gallery)
+    PATHFRONTIER_SCAN_MODEL      Fireworks model id of the fine-tuned Camelyon17 classifier used by
+                                 POST /scan (unset -> probe only); PATHFRONTIER_SCAN_API_KEY (default
+                                 FIREWORKS_API_KEY), PATHFRONTIER_SCAN_CUTOFF (default 0.1068),
+                                 PATHFRONTIER_SCAN_PROBE (default the camelyon17 Phikon-v2 probe)
 
 Slide `level`: an int DZI level, "max" (full res), "auto" (max_level - 2, ~1 um/px for a 40x
 slide) or null -> max_level - 1 (half res; 4x fewer tiles than full res, a good speed/detail
@@ -55,9 +64,10 @@ from typing import Any
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from pathfrontier import config, dzi, vqa
+from pathfrontier import config, dzi, gallery, vqa
 from pathfrontier.schema import CLASSES, DEFAULT_COST_PER_1K, POSITIVE_INDEX, save_json
 
 log = logging.getLogger("pathfrontier.serve")
@@ -87,6 +97,11 @@ class Settings:
     high: float = 0.90
     fake: bool = False
     vlm_max_tiles: int = 200
+    gallery_dir: Path = field(default_factory=gallery.default_gallery_dir)
+    scan_model: str | None = None
+    scan_api_key: str | None = None
+    scan_cutoff: float | None = None      # None -> gallery.load_cutoff() (results json / 0.1068)
+    scan_probe: Path | None = None        # None -> gallery.DEFAULT_SCAN_PROBE
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -110,6 +125,13 @@ class Settings:
             high=float(os.getenv("PATHFRONTIER_HIGH", "0.90")),
             fake=fake,
             vlm_max_tiles=int(os.getenv("PATHFRONTIER_VLM_MAX_TILES", "200")),
+            gallery_dir=gallery.default_gallery_dir(),
+            scan_model=os.getenv("PATHFRONTIER_SCAN_MODEL", "").strip() or None,
+            scan_api_key=os.getenv("PATHFRONTIER_SCAN_API_KEY", "").strip() or None,
+            scan_cutoff=float(os.getenv("PATHFRONTIER_SCAN_CUTOFF")) if os.getenv(
+                "PATHFRONTIER_SCAN_CUTOFF") else None,
+            scan_probe=Path(os.getenv("PATHFRONTIER_SCAN_PROBE")) if os.getenv(
+                "PATHFRONTIER_SCAN_PROBE") else None,
         )
 
     @property
@@ -254,6 +276,12 @@ def _vlm_classify(image, settings: Settings) -> dict:
     return r
 
 
+def _scan_vlm(image, model: str, api_key: str | None, cutoff: float) -> dict:
+    """gallery.vlm_scan wrapper for POST /scan (same prompt v2 setup as _vlm_classify).
+    Monkeypatched in tests."""
+    return gallery.vlm_scan(image, model, api_key, cutoff)
+
+
 # --------------------------------------------------------------------------------------
 # PathVQA (lazy; see vqa.py)
 # --------------------------------------------------------------------------------------
@@ -276,9 +304,14 @@ def _vqa_answer(image, question: str, settings: Settings) -> dict:
                                fake=settings.fake)
 
 
+class ScanRequest(BaseModel):
+    id: str
+
+
 class VQARequest(BaseModel):
     question: str
     image_id: str | None = None
+    gallery_id: str | None = None
     level: int | None = None
     x: int | None = None
     y: int | None = None
@@ -628,6 +661,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "images": dzi.list_image_ids(settings.tiles_dir),
             "low": settings.low,
             "high": settings.high,
+            "scan_model": settings.scan_model if scan_engine.vlm_enabled() else None,
+            "gallery": gallery.counts(gallery.load_manifest(settings.gallery_dir)),
         }
 
     @app.post("/predict/tile")
@@ -725,6 +760,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def list_images():
         return {"images": dzi.list_image_ids(settings.tiles_dir)}
 
+    scan_engine = gallery.ScanEngine(settings, scorer)
+    app.state.scan_engine = scan_engine
+
+    def gallery_item(item_id: str) -> dict:
+        _safe_id(item_id)
+        m = gallery.load_manifest(settings.gallery_dir)
+        if m is None:
+            raise HTTPException(status_code=404, detail=f"demo gallery not built at "
+                                f"{settings.gallery_dir}; run `{gallery.BUILD_CMD}`")
+        it = gallery.items_by_id(m).get(item_id)
+        if it is None:
+            raise HTTPException(status_code=404, detail=f"unknown gallery item {item_id!r}")
+        return it
+
+    @app.get("/gallery")
+    def get_gallery():
+        m = gallery.load_manifest(settings.gallery_dir)
+        if m is None:
+            raise HTTPException(status_code=404, detail=f"demo gallery not built at "
+                                f"{settings.gallery_dir}; run `{gallery.BUILD_CMD}`")
+        return gallery.public_manifest(m)
+
+    @app.get("/gallery/image/{item_id}")
+    def get_gallery_image(item_id: str):
+        it = gallery_item(item_id)
+        p = gallery.image_path(settings.gallery_dir, it)
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail=f"image file missing for {item_id!r}")
+        return FileResponse(p, media_type=gallery.media_type(p),
+                            headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.post("/scan")
+    def scan_endpoint(req: ScanRequest):
+        it = gallery_item(req.id)
+        if it.get("section") != "scan":
+            raise HTTPException(status_code=400, detail=f"{req.id!r} is not a scan item")
+        if not settings.fake:
+            scorer()  # 503 until the encoder is loaded
+        return scan_engine.cached_scan(it, lambda: gallery.open_image(settings.gallery_dir, it),
+                                       vlm_fn=_scan_vlm)
+
     vqa_cache = _VQACache()
     app.state.vqa_cache = vqa_cache
 
@@ -740,7 +816,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         model = vqa_model_name(settings)
 
         image_id = level = x = y = None
-        if req.image_id is not None:
+        gallery_id = None
+        if req.gallery_id is not None:
+            it = gallery_item(req.gallery_id)
+            gallery_id = req.gallery_id
+            key = (model, "gallery:" + gallery_id, None, None, None, question)
+            hit = vqa_cache.get(key)
+            if hit is not None:
+                return dict(hit, cached=True)
+            try:
+                image = gallery.open_image(settings.gallery_dir, it)
+            except OSError as e:
+                raise HTTPException(status_code=404, detail=f"image file missing for "
+                                    f"{gallery_id!r}: {e}") from e
+        elif req.image_id is not None:
             if req.x is None or req.y is None:
                 raise HTTPException(status_code=400, detail="image_id needs x and y")
             image_id = _safe_id(req.image_id)
@@ -794,6 +883,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "level": level,
             "x": x,
             "y": y,
+            "gallery_id": gallery_id,
         }
         vqa_cache.put(key, out)
         return dict(out, cached=False)

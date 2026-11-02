@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "created_at": "2026-11-02T14:28:59",
+  "source": "camelyon17",
+  "tile_px": 224,
+  "scan": [
+    {
+      "id": "scan_1",
+      "section": "scan",
+      "label": 1,
+      "label_name": "tumor",
+      "source": "camelyon17",
+      "meta": {
+        "tile_id": "camelyon17:test:11",
+        "slide": 25,
+        "key": "s0007742",
+        "shard": 0,
+        "hospital": 2,
+        "split": "test",
+        "probe_p_tumor": 0.9997163319587707,
+        "vlm_ft_p_tumor": 0.9968275154536945
+      },
+      "file": "scan_1.png"
+    },
+    {
+      "id": "scan_2",
+      "section": "scan",
+      "label": 1,
+      "label_name": "tumor",
+      "source": "camelyon17",
+      "meta": {
+        "tile_id": "camelyon17:test:25",
+        "slide": 23,
+        "key": "s0005648",
+        "shard": 0,
+        "hospital": 2,
+        "split": "test",
+        "probe_p_tumor": 0.9999378144741058,
+        "vlm_ft_p_tumor": 0.9914230096098663
+      },
+      "file": "scan_2.png"
+    },
+    {
+      "id": "scan_3",
+      "section": "scan",
+      "label": 0,
+      "label_name": "normal",
+      "source": "camelyon17",
+      "meta": {
+        "tile_id": "camelyon17:test:0",
+        "slide": 24,
+        "key": "s0047537",
+        "shard": 4,
+        "hospital": 2,
+        "split": "test",
+        "probe_p_tumor": 0.00016543250530958177,
+        "vlm_ft_p_tumor": 0.0019266134362882614
+      },
+      "file": "scan_3.png"
+    }
+  ],
+  "ask": [
+    {
+      "id": "ask_1",
+      "section": "ask",
+      "file": "ask_1.jpg",
+      "questions": [
+        {
+          "question": "what does this image show?",
+          "answer": "kidney",
+          "qtype": "open"
+        },
+        {
+          "question": "does this image show kidney, obliterative endarteritis - sclerodema?",
+          "answer": "yes",
+          "qtype": "closed"
+        },
+        {
+          "question": "does hypopharynx show kidney, obliterative endarteritis - sclerodema?",
+          "answer": "no",
+          "qtype": "closed"
+        },
+        {
+          "question": "where is this?",
+          "answer": "urinary",
+          "qtype": "open"
+        }
+      ],
+      "meta": {
+        "image_path": "../data/images/pathvqa/01f6f75d7dfb5835.jpg",
+        "image_sha": "01f6f75d7dfb5835",
+        "ids": [
+          "pathvqa-test-6128",
+          "pathvqa-test-6129",
+          "pathvqa-test-6130",
+          "pathvqa-test-6131"
+        ]
+      }
+    },
+    {
+      "id": "ask_2",
+      "section": "ask",
+      "file": "ask_2.jpg",
+      "questions": [
+        {
+          "question": "does this image show scleroderma?",
+          "answer": "yes",
+          "qtype": "closed"
+        },
+        {
+          "question": "does medulloblastoma show scleroderma?",
+          "answer": "no",
+          "qtype": "closed"
+        },
+        {
+          "question": "where is this?",
+          "answer": "skin",
+          "qtype": "open"
+        }
+      ],
+      "meta": {
+        "image_path": "../data/images/pathvqa/0219a724c098acf4.jpg",
+        "image_sha": "0219a724c098acf4",
+        "ids": [
+          "pathvqa-test-6055",
+          "pathvqa-test-6056",
+          "pathvqa-test-6058"
+        ]
+      }
+    },
+    {
+      "id": "ask_3",
+      "section": "ask",
+      "file": "ask_3.jpg",
+      "questions": [
+        {
+          "question": "what does this image show?",
+          "answer": "skin",
+          "qtype": "open"
+        },
+        {
+          "question": "does this image show skin, neurofibromatosis?",
+          "answer": "yes",
+          "qtype": "closed"
+        },
+        {
+          "question": "does ulcer show skin, neurofibromatosis?",
+          "answer": "no",
+          "qtype": "closed"
+        },
+        {
+          "question": "where is this?",
+          "answer": "skin",
+          "qtype": "open"
+        }
+      ],
+      "meta": {
+        "image_path": "../data/images/pathvqa/021c0c4e73fddef1.jpg",
+        "image_sha": "021c0c4e73fddef1",
+        "ids": [
+          "pathvqa-test-6012",
+          "pathvqa-test-6014",
+          "pathvqa-test-6015",
+          "pathvqa-test-6016"
+        ]
+      }
+    }
+  ]
+}
