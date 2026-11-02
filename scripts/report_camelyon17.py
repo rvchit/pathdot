@@ -119,7 +119,7 @@ def main(
     md = [
         f"# Camelyon17 baseline: `{report['model']}`", "",
         (f"{n} tiles (WILDS hospital 2, slides {', '.join(map(str, per_slide))}), "
-        f"{o['n_tumor']} tumor / {o['n_normal']} normal. Zero-shot, prompt v1, temperature 0."), "",
+        f"{o['n_tumor']} tumor / {o['n_normal']} normal. {info.get('setup', 'Zero-shot, prompt v1, temperature 0.')}"), "",
         "## Accuracy", "",
         "| metric | value |", "|---|---|",
         f"| accuracy | {pct(o['accuracy'])} (95% CI {pct(lo)}-{pct(hi)}) |",

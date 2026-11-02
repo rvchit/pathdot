@@ -1,0 +1,14 @@
+{
+  "model": "probe/phikon-v2",
+  "encoder": "owkin/phikon-v2",
+  "device": "Apple MPS (this Mac)",
+  "accelerator": "Mac GPU (MPS)",
+  "accelerator_count": 1,
+  "wall_s": 174.1,
+  "gpu_minutes": 2.9,
+  "gpu_rate_usd_per_hour": 0.0,
+  "probe_train_s": 0.8,
+  "note": "wall_s = feature extraction for 6,000 test tiles (173.3 s) + probe prediction; runs locally, no API cost",
+  "date": "2026-11-02",
+  "setup": "Phikon-v2 features + linear classifier (C=0.001, calibrated, cutoff 0.5) trained on the 10,000-tile practice pool from slides 20, 21, 27-29; no tuning on the test set."
+}

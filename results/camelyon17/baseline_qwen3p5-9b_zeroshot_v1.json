@@ -1,0 +1,159 @@
+{
+  "model": "accounts/fireworks/models/qwen3p5-9b (untrained)",
+  "preds_file": "results/camelyon17/preds_qwen3p5-9b_zeroshot_v1_test.jsonl",
+  "run_info": {
+    "model": "accounts/fireworks/models/qwen3p5-9b (untrained)",
+    "deployment_shape": "qwen3p5-9b-fast",
+    "accelerator": "NVIDIA_H200_141GB",
+    "accelerator_count": 1,
+    "precision": "FP8",
+    "prompt_version": "v1",
+    "image_px": 448,
+    "concurrency": 32,
+    "setup": "Zero-shot, prompt v1 (JSON label+confidence+reason), 448 px, temperature 0, thinking off.",
+    "deploy_ready_s": 375,
+    "wall_s": 194,
+    "gpu_minutes": 3.23,
+    "gpu_rate_usd_per_hour": 10.0,
+    "gpu_rate_note": "GPU minutes = this run's inference time only; the deployment (13.2 min incl. 6.3 min spin-up, shared by the v1 and v2 runs) is ~$2.20 at the same deliberately high rate",
+    "date": "2026-11-02"
+  },
+  "overall": {
+    "n": 6000,
+    "n_tumor": 3000,
+    "n_normal": 3000,
+    "accuracy": 0.7388333333333333,
+    "balanced_accuracy": 0.7388333333333333,
+    "sensitivity": 0.959,
+    "specificity": 0.5186666666666667,
+    "precision": 0.6658180976625782,
+    "f1": 0.7859582024313618,
+    "auroc": 0.7524271666666666,
+    "confusion": {
+      "tp": 2877,
+      "fn": 123,
+      "fp": 1444,
+      "tn": 1556
+    },
+    "accuracy_95ci": [
+      0.7275679407770662,
+      0.7497930875352065
+    ],
+    "parse_errors": 0,
+    "api_errors": 0,
+    "predicted_tumor_rate": 0.7201666666666666
+  },
+  "per_slide": {
+    "22": {
+      "n": 1947,
+      "n_tumor": 1494,
+      "n_normal": 453,
+      "accuracy": 0.9003595274781715,
+      "balanced_accuracy": 0.8627800384762006,
+      "sensitivity": 0.9330655957161981,
+      "specificity": 0.7924944812362031,
+      "precision": 0.9368279569892473,
+      "f1": 0.9349429912810194,
+      "auroc": 0.8574090327461428,
+      "confusion": {
+        "tp": 1394,
+        "fn": 100,
+        "fp": 94,
+        "tn": 359
+      }
+    },
+    "23": {
+      "n": 1281,
+      "n_tumor": 929,
+      "n_normal": 352,
+      "accuracy": 0.8555815768930523,
+      "balanced_accuracy": 0.7380981505039632,
+      "sensitivity": 0.9989235737351991,
+      "specificity": 0.4772727272727273,
+      "precision": 0.8345323741007195,
+      "f1": 0.9093581577658011,
+      "auroc": 0.7933200410999118,
+      "confusion": {
+        "tp": 928,
+        "fn": 1,
+        "fp": 184,
+        "tn": 168
+      }
+    },
+    "24": {
+      "n": 1215,
+      "n_tumor": 56,
+      "n_normal": 1159,
+      "accuracy": 0.5242798353909465,
+      "balanced_accuracy": 0.6656754591396523,
+      "sensitivity": 0.8214285714285714,
+      "specificity": 0.5099223468507333,
+      "precision": 0.0749185667752443,
+      "f1": 0.1373134328358209,
+      "auroc": 0.6800120177492912,
+      "confusion": {
+        "tp": 46,
+        "fn": 10,
+        "fp": 568,
+        "tn": 591
+      }
+    },
+    "25": {
+      "n": 843,
+      "n_tumor": 335,
+      "n_normal": 508,
+      "accuracy": 0.7153024911032029,
+      "balanced_accuracy": 0.7637795275590551,
+      "sensitivity": 1.0,
+      "specificity": 0.5275590551181102,
+      "precision": 0.5826086956521739,
+      "f1": 0.7362637362637363,
+      "auroc": 0.828302385709249,
+      "confusion": {
+        "tp": 335,
+        "fn": 0,
+        "fp": 240,
+        "tn": 268
+      }
+    },
+    "26": {
+      "n": 714,
+      "n_tumor": 186,
+      "n_normal": 528,
+      "accuracy": 0.48179271708683474,
+      "balanced_accuracy": 0.6287267839687194,
+      "sensitivity": 0.9354838709677419,
+      "specificity": 0.32196969696969696,
+      "precision": 0.32706766917293234,
+      "f1": 0.48467966573816157,
+      "auroc": 0.6239308406647116,
+      "confusion": {
+        "tp": 174,
+        "fn": 12,
+        "fp": 358,
+        "tn": 170
+      }
+    }
+  },
+  "tokens": {
+    "input_total": 2580000,
+    "output_total": 258064,
+    "input_per_image": 430.0,
+    "output_per_image": 43.010666666666665,
+    "total_per_image": 473.0106666666667
+  },
+  "cost": {
+    "token_price_proxy_usd": 2.5542576,
+    "gpu_usd_estimate": 0.5383333333333333,
+    "gpu_usd_per_1k_images": 0.08972222222222223
+  },
+  "speed": {
+    "latency_mean_ms": 1012.1442425825227,
+    "latency_p50_ms": 808.9033334690612,
+    "latency_p95_ms": 1248.567770794034,
+    "latency_max_ms": 12282.957500021439,
+    "wall_s": 194,
+    "images_per_s": 30.927835051546392,
+    "output_tokens_per_s": 1330.2268041237114
+  }
+}

@@ -35,6 +35,9 @@ def main(
     seed: int = typer.Option(0),
     dry_run: bool = typer.Option(False),
     results_dir: str = typer.Option("", help="default: results/"),
+    no_thinking: bool = typer.Option(False, help="reasoning_effort=none for hybrid-reasoning models"),
+    ids_file: str = typer.Option("", help="CSV with a tile_id column: classify only these tiles"),
+    out_name: str = typer.Option("", help="name for the preds file (default: the model id)"),
 ) -> None:
     if not model:
         if dry_run:
@@ -44,7 +47,9 @@ def main(
     out, summary = run_split(
         model=model, dataset=dataset, split=split, limit=(limit or None), concurrency=concurrency,
         prompt_version=prompt_version, provider=provider, stage="vlm_ft", dry_run=dry_run,
-        seed=seed, results_dir=Path(results_dir) if results_dir else config.RESULTS_DIR, out_name=model,
+        seed=seed, results_dir=Path(results_dir) if results_dir else config.RESULTS_DIR,
+        out_name=out_name or model, no_thinking=no_thinking,
+        ids_file=Path(ids_file) if ids_file else None,
     )
     typer.echo(f"stage=vlm_ft model={model}")
     typer.echo(f"wrote {out}")

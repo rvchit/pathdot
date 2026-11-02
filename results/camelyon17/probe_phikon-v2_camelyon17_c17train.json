@@ -1,0 +1,23 @@
+{
+  "encoder": "phikon-v2",
+  "dataset": "camelyon17",
+  "train_dataset": "camelyon17",
+  "train_split": "train",
+  "test_split": "test",
+  "n_train": 10000,
+  "n_test": 6000,
+  "C": 0.001,
+  "calibrated": true,
+  "auroc": 0.9771856666666667,
+  "auroc_macro_ovr": null,
+  "balanced_accuracy": 0.8600000000000001,
+  "accuracy": 0.86,
+  "tiles_per_s": 34.6122963166769,
+  "device": "mps",
+  "gpu_usd_per_hour": 0.0,
+  "cost_per_tile_usd": 0.0,
+  "cost_per_1k_usd": 0.0,
+  "latency_ms": 28.891466513829076,
+  "model_path": "results/camelyon17/probe_phikon-v2_camelyon17_c17train.joblib",
+  "preds_path": "results/camelyon17/preds_probe_phikon-v2_c17train_test.jsonl"
+}

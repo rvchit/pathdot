@@ -213,14 +213,20 @@ def build_sft_example(record: TileLike, dataset: str,
 
     messages = [system (baseline prompt), user [image part, baseline user text], assistant JSON].
     The assistant target is the strict JSON the baseline parser expects:
-    ``{"label": "<class>", "confidence": <float>, "reason": "<one sentence>"}``.
+    ``{"label": "<class>", "confidence": <float>, "reason": "<one sentence>"}``,
+    or, for the one-word prompt (v2), just the class name.
     """
+    from pathfrontier.vlm_client import ONE_WORD_PROMPTS
+
     classes = schema.CLASSES[dataset]
     label_name = classes[int(record.label)]
-    templates = (rationale_templates or RATIONALE_TEMPLATES[dataset])[label_name]
     system, user_text = build_instruction(dataset, prompt_version)
-    answer = {"label": label_name, "confidence": float(confidence),
-              "reason": pick_rationale(templates, record.tile_id, seed)}
+    if prompt_version in ONE_WORD_PROMPTS:
+        answer_text = label_name
+    else:
+        templates = (rationale_templates or RATIONALE_TEMPLATES[dataset])[label_name]
+        answer_text = json.dumps({"label": label_name, "confidence": float(confidence),
+                                  "reason": pick_rationale(templates, record.tile_id, seed)})
     return {
         "messages": [
             {"role": "system", "content": system},
@@ -228,7 +234,7 @@ def build_sft_example(record: TileLike, dataset: str,
                 {"type": "image_url", "image_url": {"url": image_to_data_url(record.image, image_size)}},
                 {"type": "text", "text": user_text},
             ]},
-            {"role": "assistant", "content": json.dumps(answer)},
+            {"role": "assistant", "content": answer_text},
         ],
         # Extra top-level keys are ignored by Fireworks; handy for audits / eval joins.
         "tile_id": record.tile_id,
@@ -238,7 +244,8 @@ def build_sft_example(record: TileLike, dataset: str,
 
 def write_sft_jsonl(records: Iterable[TileLike], dataset: str, path: Path, image_size: int = 448,
                     seed: int = 0, rationale_templates: dict[str, list[str]] | None = None,
-                    progress: Callable[[Iterable], Iterable] | None = None) -> int:
+                    progress: Callable[[Iterable], Iterable] | None = None,
+                    prompt_version: str = "v1") -> int:
     """Write one example per record; returns the number of lines written."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,7 +253,8 @@ def write_sft_jsonl(records: Iterable[TileLike], dataset: str, path: Path, image
     n = 0
     with open(path, "w") as f:
         for rec in it:
-            ex = build_sft_example(rec, dataset, rationale_templates, image_size=image_size, seed=seed)
+            ex = build_sft_example(rec, dataset, rationale_templates, image_size=image_size, seed=seed,
+                                   prompt_version=prompt_version)
             f.write(json.dumps(ex) + "\n")
             n += 1
     return n
@@ -385,7 +393,12 @@ def validate_sft_jsonl(path: Path, max_errors: int = 50) -> ValidationReport:
                             if lab is not None:
                                 rep.label_counts[str(lab)] = rep.label_counts.get(str(lab), 0) + 1
                         except json.JSONDecodeError:
-                            rep.errors.append(f"line {ln}: assistant content is not JSON")
+                            word = content.strip()
+                            if word.isalpha():  # one-word target (prompt v2)
+                                rep.label_counts[word] = rep.label_counts.get(word, 0) + 1
+                            else:
+                                rep.errors.append(f"line {ln}: assistant content is neither "
+                                                  "JSON nor a single class word")
             if not has_assistant:
                 rep.errors.append(f"line {ln}: no assistant message (nothing to learn)")
     if rep.n_examples < MIN_EXAMPLES:

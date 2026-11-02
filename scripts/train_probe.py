@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pathfrontier import config
 from pathfrontier.probe import LinearProbe
 from pathfrontier.schema import (
+    CLASSES,
     POSITIVE_INDEX,
     embedding_paths,
     preds_path,
@@ -82,7 +83,9 @@ def macro_auroc(y: np.ndarray, p: np.ndarray) -> float | None:
 @app.command()
 def main(
     encoder: str = typer.Option("phikon-v2"),
-    dataset: str = typer.Option("pcam"),
+    dataset: str = typer.Option("pcam", help="test dataset (and train dataset unless overridden)"),
+    train_dataset: str | None = typer.Option(None, help="train on another dataset with the same "
+                                             "label space, e.g. pcam -> camelyon17"),
     train_split: str | None = typer.Option(None, help="default: valid for pcam, train for crc"),
     test_split: str = typer.Option("test"),
     c: float = typer.Option(1.0, "--C", help="inverse L2 regularisation strength"),
@@ -91,28 +94,36 @@ def main(
     gpu_usd_per_hour: float = typer.Option(GPU_USD_PER_HOUR),
     tiles_per_s: float | None = typer.Option(None, help="override measured encoder throughput"),
     seed: int = typer.Option(0),
+    tag: str = typer.Option("", help="suffix for output names, to keep several probes apart"),
+    results_dir: str = typer.Option("", help="default: results/"),
 ) -> None:
-    train_split = train_split or DEFAULT_TRAIN_SPLIT.get(dataset, "train")
-    Xtr, ytr, _, meta_tr = load_cache(encoder, dataset, train_split)
+    train_dataset = train_dataset or dataset
+    if CLASSES[train_dataset] != CLASSES[dataset]:
+        raise typer.BadParameter(f"{train_dataset} and {dataset} have different label spaces")
+    out_dir = Path(results_dir) if results_dir else config.RESULTS_DIR
+    suffix = f"_{tag}" if tag else ""
+    train_split = train_split or DEFAULT_TRAIN_SPLIT.get(train_dataset, "train")
+    Xtr, ytr, _, meta_tr = load_cache(encoder, train_dataset, train_split)
     Xte, yte, ids_te, meta_te = load_cache(encoder, dataset, test_split)
 
     cw = None if class_weight in (None, "none", "None", "") else class_weight
     probe = LinearProbe(encoder, dataset, C=c, calibrate=calibrate, class_weight=cw, seed=seed)
     probe.fit(Xtr, ytr)
-    model_path = config.RESULTS_DIR / f"probe_{encoder}_{dataset}.joblib"
+    model_path = out_dir / f"probe_{encoder}_{train_dataset}{suffix}.joblib"
     probe.save(model_path)
 
     tps = tiles_per_s or meta_te.get("tiles_per_s") or meta_tr.get("tiles_per_s")
     cost_per_tile = (1.0 / tps) * gpu_usd_per_hour / 3600.0
     latency_ms = 1000.0 / tps
     preds = probe.predict_records(Xte, yte, ids_te, test_split, latency_ms, cost_per_tile)
-    out = preds_path(probe.model_name, test_split, config.RESULTS_DIR)
+    out = preds_path(probe.model_name + suffix, test_split, out_dir)
     write_predictions(preds, out)
 
     p = probe.predict_proba(Xte)
     y_hat = p.argmax(1)
     summary = {
-        "encoder": encoder, "dataset": dataset, "train_split": train_split,
+        "encoder": encoder, "dataset": dataset, "train_dataset": train_dataset,
+        "train_split": train_split,
         "test_split": test_split, "n_train": len(ytr), "n_test": len(yte),
         "C": c, "calibrated": probe.is_calibrated,
         "auroc": auroc(yte, p, dataset), "auroc_macro_ovr": macro_auroc(yte, p),
@@ -123,9 +134,9 @@ def main(
         "cost_per_1k_usd": cost_per_tile * 1000, "latency_ms": latency_ms,
         "model_path": str(model_path), "preds_path": str(out),
     }
-    save_json(summary, config.RESULTS_DIR / f"probe_{encoder}_{dataset}.json")
+    save_json(summary, out_dir / f"probe_{encoder}_{dataset}{suffix}.json")
 
-    typer.echo(f"probe/{encoder} on {dataset}: train={train_split} (n={len(ytr)}), "
+    typer.echo(f"probe/{encoder} on {dataset}: train={train_dataset}/{train_split} (n={len(ytr)}), "
                f"test={test_split} (n={len(yte)}), calibrated={probe.is_calibrated}")
     a = summary["auroc"]
     typer.echo(f"  AUROC (positive vs rest): {a:.4f}" if a is not None else "  AUROC: n/a")

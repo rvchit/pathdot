@@ -1,0 +1,156 @@
+{
+  "model": "probe/phikon-v2",
+  "preds_file": "results/camelyon17/preds_probe_phikon-v2_c17train_test.jsonl",
+  "run_info": {
+    "model": "probe/phikon-v2",
+    "encoder": "owkin/phikon-v2",
+    "device": "Apple MPS (this Mac)",
+    "accelerator": "Mac GPU (MPS)",
+    "accelerator_count": 1,
+    "wall_s": 174.1,
+    "gpu_minutes": 2.9,
+    "gpu_rate_usd_per_hour": 0.0,
+    "probe_train_s": 0.8,
+    "note": "wall_s = feature extraction for 6,000 test tiles (173.3 s) + probe prediction; runs locally, no API cost",
+    "date": "2026-11-02",
+    "setup": "Phikon-v2 features + linear classifier (C=0.001, calibrated, cutoff 0.5) trained on the 10,000-tile practice pool from slides 20, 21, 27-29; no tuning on the test set."
+  },
+  "overall": {
+    "n": 6000,
+    "n_tumor": 3000,
+    "n_normal": 3000,
+    "accuracy": 0.86,
+    "balanced_accuracy": 0.8600000000000001,
+    "sensitivity": 0.7446666666666667,
+    "specificity": 0.9753333333333334,
+    "precision": 0.9679376083188909,
+    "f1": 0.841748304446119,
+    "auroc": 0.9771856666666667,
+    "confusion": {
+      "tp": 2234,
+      "fn": 766,
+      "fp": 74,
+      "tn": 2926
+    },
+    "accuracy_95ci": [
+      0.8509894554877138,
+      0.8685498474812385
+    ],
+    "parse_errors": 0,
+    "api_errors": 0,
+    "predicted_tumor_rate": 0.38466666666666666
+  },
+  "per_slide": {
+    "22": {
+      "n": 1947,
+      "n_tumor": 1494,
+      "n_normal": 453,
+      "accuracy": 0.6712891628145865,
+      "balanced_accuracy": 0.7850408255538711,
+      "sensitivity": 0.572289156626506,
+      "specificity": 0.9977924944812362,
+      "precision": 0.9988317757009346,
+      "f1": 0.7276595744680852,
+      "auroc": 0.9943866710403055,
+      "confusion": {
+        "tp": 855,
+        "fn": 639,
+        "fp": 1,
+        "tn": 452
+      }
+    },
+    "23": {
+      "n": 1281,
+      "n_tumor": 929,
+      "n_normal": 352,
+      "accuracy": 0.990632318501171,
+      "balanced_accuracy": 0.9891302353459243,
+      "sensitivity": 0.9924650161463939,
+      "specificity": 0.9857954545454546,
+      "precision": 0.9946062567421791,
+      "f1": 0.9935344827586207,
+      "auroc": 0.9993547558469518,
+      "confusion": {
+        "tp": 922,
+        "fn": 7,
+        "fp": 5,
+        "tn": 347
+      }
+    },
+    "24": {
+      "n": 1215,
+      "n_tumor": 56,
+      "n_normal": 1159,
+      "accuracy": 0.9810699588477366,
+      "balanced_accuracy": 0.9051060027116973,
+      "sensitivity": 0.8214285714285714,
+      "specificity": 0.9887834339948232,
+      "precision": 0.7796610169491526,
+      "f1": 0.8,
+      "auroc": 0.990832614322692,
+      "confusion": {
+        "tp": 46,
+        "fn": 10,
+        "fp": 13,
+        "tn": 1146
+      }
+    },
+    "25": {
+      "n": 843,
+      "n_tumor": 335,
+      "n_normal": 508,
+      "accuracy": 0.9371293001186239,
+      "balanced_accuracy": 0.9478346456692913,
+      "sensitivity": 1.0,
+      "specificity": 0.8956692913385826,
+      "precision": 0.8634020618556701,
+      "f1": 0.9266943291839558,
+      "auroc": 0.9993771300975438,
+      "confusion": {
+        "tp": 335,
+        "fn": 0,
+        "fp": 53,
+        "tn": 455
+      }
+    },
+    "26": {
+      "n": 714,
+      "n_tumor": 186,
+      "n_normal": 528,
+      "accuracy": 0.8431372549019608,
+      "balanced_accuracy": 0.7024071358748778,
+      "sensitivity": 0.40860215053763443,
+      "specificity": 0.9962121212121212,
+      "precision": 0.9743589743589743,
+      "f1": 0.5757575757575758,
+      "auroc": 0.9164324698598892,
+      "confusion": {
+        "tp": 76,
+        "fn": 110,
+        "fp": 2,
+        "tn": 526
+      }
+    }
+  },
+  "tokens": {
+    "input_total": 0,
+    "output_total": 0,
+    "input_per_image": 0.0,
+    "output_per_image": 0.0,
+    "total_per_image": 0.0
+  },
+  "cost": {
+    "token_price_proxy_usd": 0.0,
+    "gpu_usd_estimate": 0.0,
+    "gpu_usd_per_1k_images": 0.0
+  },
+  "speed": {
+    "latency_mean_ms": 28.891466513829076,
+    "latency_p50_ms": 28.891466513829076,
+    "latency_p95_ms": 28.891466513829076,
+    "latency_max_ms": 28.891466513829076,
+    "wall_s": 174.1,
+    "images_per_s": 34.46295232624928,
+    "output_tokens_per_s": 0.0
+  }
+}

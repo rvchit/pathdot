@@ -1,0 +1,5 @@
+{
+  "cutoff": 0.10677867614141993,
+  "method": "max(sensitivity+specificity-1) on 2,393 slide-29 dev tiles",
+  "dev_auroc": 0.9788636829351826
+}

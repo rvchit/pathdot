@@ -1,0 +1,19 @@
+{
+  "model": "accounts/ramaratnam-rishi-272/models/qwen3p5-9b-camelyon17-v2 (Qwen3.5-9B + LoRA)",
+  "base_model": "accounts/fireworks/models/qwen3p5-9b",
+  "training": {"job": "iap42xel", "method": "LoRA SFT rank 16, 2 epochs", "examples": 7607, "slides": [20, 21, 27, 28], "tokens_per_epoch_est": 928054, "minutes": 20.0, "cost_usd_est": 0.53},
+  "deployment_shape": "qwen3p5-9b-fast",
+  "accelerator": "NVIDIA_H200_141GB",
+  "accelerator_count": 1,
+  "precision": "FP8",
+  "prompt_version": "v2",
+  "image_px": 224,
+  "concurrency": 32,
+  "setup": "Fine-tuned (LoRA) on 7,607 tiles from slides 20, 21, 27, 28; prompt v2 (one word, P(tumor) from logprobs), 224 px, thinking off; cutoff 0.107 chosen on the 2,393-tile slide-29 dev set (never on test).",
+  "deploy_ready_s": 313,
+  "wall_s": 84,
+  "gpu_minutes": 1.4,
+  "gpu_rate_usd_per_hour": 10.0,
+  "gpu_rate_note": "GPU minutes = test inference only; the deployment ran 8.9 min in total (5.2 min spin-up, 1.7 min dev run, 1.4 min test run), ~$1.48 at the same deliberately high rate",
+  "date": "2026-11-02"
+}

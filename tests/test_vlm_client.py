@@ -253,3 +253,17 @@ def test_run_split_dry_run_writes_file(tmp_path):
     preds = schema.load_predictions(out)
     assert len(preds) == 8 == summary["n"]
     assert summary["parse_errors"] == 0 and 0.5 <= summary["accuracy"] <= 1.0
+
+
+def test_p_tumor_from_logprobs_handles_split_tokens():
+    from types import SimpleNamespace as NS
+
+    def lp(*cands):
+        return NS(content=[NS(top_logprobs=[NS(token=t, logprob=v) for t, v in cands])])
+
+    # Qwen3-VL emits "tumor" as "t" + "umor"
+    p = vc.p_tumor_from_logprobs(lp(("t", -0.03), ("normal", -3.53), ("肿瘤", -18.0)))
+    assert 0.96 < p < 0.98
+    assert vc.p_tumor_from_logprobs(lp(("normal", 0.0), ("t", -9.25))) < 0.001
+    assert vc.p_tumor_from_logprobs(lp(("foo", 0.0))) is None
+    assert vc.p_tumor_from_logprobs(None) is None

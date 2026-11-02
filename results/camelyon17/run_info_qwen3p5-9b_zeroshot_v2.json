@@ -1,0 +1,17 @@
+{
+  "model": "accounts/fireworks/models/qwen3p5-9b (untrained)",
+  "deployment_shape": "qwen3p5-9b-fast",
+  "accelerator": "NVIDIA_H200_141GB",
+  "accelerator_count": 1,
+  "precision": "FP8",
+  "prompt_version": "v2",
+  "image_px": 224,
+  "concurrency": 32,
+  "setup": "Zero-shot, prompt v2 (one word, P(tumor) from first-token logprobs, cutoff 0.5), 224 px, temperature 0, thinking off.",
+  "deploy_ready_s": 375,
+  "wall_s": 126,
+  "gpu_minutes": 2.10,
+  "gpu_rate_usd_per_hour": 10.0,
+  "gpu_rate_note": "GPU minutes = this run's inference time only; the deployment (13.2 min incl. 6.3 min spin-up, shared by the v1 and v2 runs) is ~$2.20 at the same deliberately high rate",
+  "date": "2026-11-02"
+}

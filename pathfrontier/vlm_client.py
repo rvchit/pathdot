@@ -149,10 +149,28 @@ def _json_schema_hint(classes: list[str]) -> str:
     )
 
 
+# v2: one-word answer (fine-tuning target and logprob scoring). Settings it implies at inference.
+ONE_WORD_PROMPTS = ("v2",)
+V2_IMAGE_PX = 224       # 96 px tiles carry no extra detail at 448; 224 is ~4x fewer image tokens
+V2_MAX_TOKENS = 3
+V2_TOP_LOGPROBS = 5
+
+
 def build_prompt(dataset: str, prompt_version: str = "v1") -> tuple[str, str]:
-    """Return (system_prompt, user_text) for a dataset + prompt version."""
+    """Return (system_prompt, user_text) for a dataset + prompt version.
+
+    v1: the baseline JSON prompt (label, confidence, reason).
+    v2: short instruction, the answer is the single word "tumor" or "normal" (binary datasets).
+    """
+    if prompt_version == "v2":
+        if schema.CLASSES[dataset] != schema.PCAM_CLASSES:
+            raise ValueError(f"prompt v2 is binary tumor/normal only, not {dataset!r}")
+        system = ("You are a pathologist. You see one H&E patch from a sentinel lymph node of a "
+                  "breast cancer patient. Answer with one word: tumor if the centre of the patch "
+                  "contains metastatic tumor cells, otherwise normal.")
+        return system, "tumor or normal?"
     if prompt_version != "v1":
-        raise ValueError(f"unknown prompt_version {prompt_version!r}; only 'v1' exists")
+        raise ValueError(f"unknown prompt_version {prompt_version!r}; expected 'v1' or 'v2'")
     classes = schema.CLASSES[dataset]
     if dataset in ("pcam", "camelyon17"):
         source = ("one small H&E-stained patch (96x96 um at 10x) taken from a sentinel lymph node "
@@ -485,7 +503,28 @@ async def _call_openai(client: Any, image: Image.Image, dataset: str, cfg: VLMCo
     usage = getattr(resp, "usage", None)
     tin = int(getattr(usage, "prompt_tokens", 0) or 0)
     tout = int(getattr(usage, "completion_tokens", 0) or 0)
-    return raw, tin, tout
+    p_tumor = p_tumor_from_logprobs(getattr(choice, "logprobs", None))
+    return raw, tin, tout, ({} if p_tumor is None else {"p_tumor": p_tumor})
+
+
+def p_tumor_from_logprobs(logprobs: Any) -> float | None:
+    """P(tumor) from the first generated token's top_logprobs, renormalised over the two answers.
+
+    A candidate token counts for a class when it is a prefix of that word ("t" -> tumor, as Qwen3-VL
+    splits it into "t" + "umor"), so it works however the tokenizer splits the words. None if
+    logprobs are absent or name neither.
+    """
+    content = getattr(logprobs, "content", None) or []
+    if not content:
+        return None
+    mass = {"tumor": 0.0, "normal": 0.0}
+    for cand in getattr(content[0], "top_logprobs", None) or []:
+        tok = str(getattr(cand, "token", "")).strip().lower()
+        for word in mass:
+            if tok and word.startswith(tok):
+                mass[word] += math.exp(float(getattr(cand, "logprob", -math.inf)))
+    total = mass["tumor"] + mass["normal"]
+    return mass["tumor"] / total if total > 0 else None
 
 
 async def _call_anthropic(client: Any, image: Image.Image, dataset: str, cfg: VLMConfig,
@@ -511,7 +550,7 @@ async def _call_anthropic(client: Any, image: Image.Image, dataset: str, cfg: VL
     usage = getattr(resp, "usage", None)
     tin = int(getattr(usage, "input_tokens", 0) or 0)
     tout = int(getattr(usage, "output_tokens", 0) or 0)
-    return raw, tin, tout
+    return raw, tin, tout, {}
 
 
 async def classify_tile_async(image: Image.Image, dataset: str, cfg: VLMConfig,
@@ -521,15 +560,19 @@ async def classify_tile_async(image: Image.Image, dataset: str, cfg: VLMConfig,
     call = _call_anthropic if cfg.provider == "anthropic" else _call_openai
     t0 = time.perf_counter()
     try:
-        raw, tin, tout = await _with_retries(
+        raw, tin, tout, scores = await _with_retries(
             lambda: call(client, image, dataset, cfg, prompt_version), cfg)
         api_error = None
     except Exception as exc:  # noqa: BLE001 - exhausted retries/non-retryable: record it
-        raw, tin, tout, api_error = "", 0, 0, f"{type(exc).__name__}: {exc}"[:300]
+        raw, tin, tout, scores = "", 0, 0, {}
+        api_error = f"{type(exc).__name__}: {exc}"[:300]
     latency_ms = (time.perf_counter() - t0) * 1000.0
     parsed = parse_response(raw, dataset)
     n = len(schema.CLASSES[dataset])
     probs = probs_from(parsed["label"], parsed["confidence"], n)
+    if "p_tumor" in scores and n == 2:
+        probs = [1.0 - scores["p_tumor"], scores["p_tumor"]]
+        parsed["confidence"] = max(probs)
     label = parsed["label"] if parsed["label"] is not None else int(max(range(n), key=probs.__getitem__))
     out = {
         "label": int(label),
@@ -543,6 +586,8 @@ async def classify_tile_async(image: Image.Image, dataset: str, cfg: VLMConfig,
         "parse_error": bool(parsed["parse_error"]),
         "confidence": float(parsed["confidence"]),
     }
+    if "p_tumor" in scores:
+        out["logprob_p_tumor"] = scores["p_tumor"]
     if api_error:
         out["api_error"] = api_error
         out["parse_error"] = True
@@ -699,16 +744,33 @@ def summarize(preds: list[schema.Prediction]) -> dict:
 def run_split(model: str, dataset: str, split: str, limit: int | None, concurrency: int,
               prompt_version: str, provider: str, stage: str, dry_run: bool = False,
               seed: int = 0, results_dir: Path | None = None, cache_dir: Path | None = None,
-              out_name: str | None = None) -> tuple[Path, dict]:
-    """Load tiles, classify, write preds JSONL, return (path, summary)."""
+              out_name: str | None = None, no_thinking: bool = False,
+              ids_file: Path | None = None) -> tuple[Path, dict]:
+    """Load tiles, classify, write preds JSONL, return (path, summary).
+
+    ``ids_file``: CSV with a ``tile_id`` column; only those tiles of the split are classified
+    (e.g. the slide-29 dev tiles of the camelyon17 training pool).
+    """
     results_dir = results_dir or config.RESULTS_DIR
     cache_dir = cache_dir or config.CACHE_DIR
     cfg = VLMConfig(model=model, provider=provider, concurrency=concurrency)
+    if prompt_version in ONE_WORD_PROMPTS:
+        cfg.min_image_px, cfg.max_tokens = V2_IMAGE_PX, V2_MAX_TOKENS
+        if provider == "openai":
+            cfg.extra.update({"logprobs": True, "top_logprobs": V2_TOP_LOGPROBS})
+    if no_thinking:  # hybrid-reasoning models (e.g. Qwen3.5) otherwise spend max_tokens thinking
+        cfg.extra["extra_body"] = {"reasoning_effort": "none"}
     if not dry_run and not cfg.api_key:
         env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "FIREWORKS_API_KEY"
         raise SystemExit(f"{env} is not set; use --dry-run to exercise the pipeline offline.")
 
     records = _load_records(dataset, split, limit, seed, dry_run)
+    if ids_file:
+        import csv
+
+        with open(ids_file) as f:
+            keep = {row["tile_id"] for row in csv.DictReader(f)}
+        records = [r for r in records if r.tile_id in keep]
     client = None
     if dry_run:
         oracle = {image_hash(r.image, cfg.min_image_px): int(r.label) for r in records}
