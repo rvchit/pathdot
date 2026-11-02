@@ -48,7 +48,22 @@ Serving: one 9B deployment answers a question in half a second for about $0.001.
 - At 8 slides a day, that is a working day returned per week per pathologist.
   (Constants live in `pathfrontier/config.py`; swap in a pathologist's real numbers if one is in the room.)
 
-## Demo click script (4 minutes)
+## Pushing the dimension: epochs
+1 epoch: eval loss 1.11 -> 0.57. 3 epochs: 0.570 / 0.576 / 0.645 after epochs 1 / 2 / 3 while train
+loss kept falling to 0.24. Held-out loss bottoms at epoch 1; more epochs memorise the 8,000 answers.
+The 1-epoch model is the one deployed. Training cost of both runs together: under $1.50.
+
+## Demo click script, gallery page (3 minutes)
+Open `http://localhost:4000/demo` (started by `make dev`).
+1. **Tumor scan.** Click Tile 1, press *Scan for tumor*: red "TUMOR DETECTED", confidence, who decided,
+   latency, then the ground-truth reveal. Tile 3 is the normal one: green "NO TUMOR". These are real
+   Camelyon17 test tiles from a hospital the model never trained on.
+2. **Ask the assistant.** Click Image 1 (gross kidney). Click the chips: "what does this image show?" ->
+   kidney, "where is this?" -> urinary, the yes/no question -> yes, each with the dataset's expected
+   answer and a match mark, ~300 ms and $0.0002 per question after the first call.
+3. Type a free question of your own. Then jump to the slide viewer for the heatmap if there is time.
+
+## Demo click script, slide viewer (4 minutes)
 
 1. `make dev` is running; open `http://localhost:4000/?image=pcam_mosaic_24`. The slide is 576 real
    PCam test tiles stitched into one image with ground truth.
