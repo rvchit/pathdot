@@ -1,0 +1,17 @@
+{
+  "model": "accounts/fireworks/models/qwen2p5-vl-32b-instruct",
+  "deployment": "accounts/ramaratnam-rishi-272/deployments/qwen25vl32b-baseline",
+  "deployment_shape": "qwen2p5-vl-32b-instruct-minimal",
+  "accelerator": "NVIDIA_H200_141GB",
+  "accelerator_count": 1,
+  "precision": "BF16",
+  "prompt_version": "v1",
+  "temperature": 0.0,
+  "concurrency": 32,
+  "deploy_ready_s": 222,
+  "wall_s": 438,
+  "gpu_minutes": 12.6,
+  "gpu_rate_usd_per_hour": 10.0,
+  "gpu_rate_note": "deliberately high budgeting rate, not a quoted Fireworks price; check the Fireworks billing page for the actual charge",
+  "date": "2026-11-02"
+}

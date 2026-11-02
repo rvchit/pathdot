@@ -4,6 +4,7 @@ plus an offline synthetic fixture (CONTRACTS.md section 1).
 On-disk layout (DATA_DIR = config.DATA_DIR):
     data/pcam/{train,valid,test}.parquet
     data/crc/{train,test}.parquet          # crc "valid" is a seeded 10% holdout carved out of train.parquet
+    data/camelyon17/{train,test}.parquet   # slide-disjoint WILDS hospital-2 subsets (make_camelyon17_subset.py)
 
 Each parquet has the HF schema: columns ``image`` (struct {bytes, path}) and ``label``
 (bool for pcam, int class index for crc). Shards are concatenated into one file per split
@@ -48,7 +49,7 @@ HF_SOURCES: dict[str, tuple[str, dict[str, str]]] = {
 CRC_HOLDOUT_SEED = 20251029
 CRC_HOLDOUT_FRAC = 0.10
 ROW_GROUP_SIZE = 1024
-TILE_SIZE = {"pcam": 96, "crc": 224}
+TILE_SIZE = {"pcam": 96, "crc": 224, "camelyon17": 96}
 
 
 @dataclass
@@ -104,6 +105,9 @@ def download(dataset: DatasetName, splits: Iterable[Split] = ("valid", "test"),
     from huggingface_hub import snapshot_download
 
     data_dir = Path(data_dir or DATA_DIR)
+    if dataset not in HF_SOURCES:
+        raise RuntimeError(f"{dataset} has no HF parquet source; build it with "
+                           "scripts/make_camelyon17_subset.py")
     repo, split_map = HF_SOURCES[dataset]
     for split in splits:
         _check_args(dataset, split)
@@ -288,7 +292,7 @@ def _lines(draw: ImageDraw.ImageDraw, rng: np.random.Generator, n: int,
 
 def _draw_tile(rng: np.random.Generator, dataset: str, label: int, size: int) -> Image.Image:
     cls = CLASSES[dataset][label]
-    if dataset == "pcam":
+    if dataset in ("pcam", "camelyon17"):
         cls = {"normal": "NORM_PCAM", "tumor": "TUM"}[cls]
 
     bg = {

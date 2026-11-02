@@ -14,15 +14,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-DatasetName = Literal["pcam", "crc"]
+DatasetName = Literal["pcam", "crc", "camelyon17"]
 Split = Literal["train", "valid", "test"]
 
 # Label spaces. Binary PCam: index 1 == tumor (positive class for sensitivity).
 PCAM_CLASSES = ["normal", "tumor"]
 CRC_CLASSES = ["ADI", "BACK", "DEB", "LYM", "MUC", "MUS", "NORM", "STR", "TUM"]
 CRC_POSITIVE_CLASS = "TUM"  # for sensitivity/specificity we treat TUM-vs-rest as the clinical question
-CLASSES = {"pcam": PCAM_CLASSES, "crc": CRC_CLASSES}
-POSITIVE_INDEX = {"pcam": 1, "crc": CRC_CLASSES.index(CRC_POSITIVE_CLASS)}
+# Camelyon17-WILDS shares the PCam label space (centre 32x32 px contains tumor or not).
+CLASSES = {"pcam": PCAM_CLASSES, "crc": CRC_CLASSES, "camelyon17": PCAM_CLASSES}
+POSITIVE_INDEX = {"pcam": 1, "crc": CRC_CLASSES.index(CRC_POSITIVE_CLASS), "camelyon17": 1}
 
 # Cost model in USD per 1,000 tiles. Baseline/fine-tuned VLM costs are filled from the
 # live price list by the vlm_client (tokens * price). Probe cost is amortised GPU time:

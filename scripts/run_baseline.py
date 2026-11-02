@@ -32,7 +32,7 @@ def print_summary(out: Path, summary: dict, model: str, stage: str) -> None:
 @app.command()
 def main(
     model: str = typer.Option(DEFAULT_BASELINE_MODEL, help="Model id on the provider"),
-    dataset: str = typer.Option("pcam", help="pcam | crc"),
+    dataset: str = typer.Option("pcam", help="pcam | crc | camelyon17"),
     split: str = typer.Option("test", help="train | valid | test"),
     limit: int | None = typer.Option(500, help="Number of tiles (seeded shuffle); 0 = all"),
     concurrency: int = typer.Option(8),

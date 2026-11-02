@@ -21,6 +21,7 @@ cache/*
 tiles/*
 results/*
 !results/demo/
+!results/camelyon17/
 results/demo/*.jsonl
 !results/.gitkeep
 !tiles/.gitkeep

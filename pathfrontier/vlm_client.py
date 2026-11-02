@@ -154,11 +154,14 @@ def build_prompt(dataset: str, prompt_version: str = "v1") -> tuple[str, str]:
     if prompt_version != "v1":
         raise ValueError(f"unknown prompt_version {prompt_version!r}; only 'v1' exists")
     classes = schema.CLASSES[dataset]
-    if dataset == "pcam":
+    if dataset in ("pcam", "camelyon17"):
+        source = ("one small H&E-stained patch (96x96 um at 10x) taken from a sentinel lymph node "
+                  "section of a breast cancer patient (PatchCamelyon)") if dataset == "pcam" else (
+                  "one small 96x96 px H&E-stained patch taken from a sentinel lymph node whole-slide "
+                  "image of a breast cancer patient (Camelyon17)")
         system = (
             "You are a board-certified pathologist specialising in breast cancer staging. "
-            "You are shown one small H&E-stained patch (96x96 um at 10x) taken from a sentinel "
-            "lymph node section of a breast cancer patient (PatchCamelyon). Decide whether the "
+            f"You are shown {source}. Decide whether the "
             "CENTRE region of the patch contains metastatic tumour cells. Tumour: sheets or "
             "clusters of epithelial cells with enlarged, pleomorphic, hyperchromatic nuclei, "
             "prominent nucleoli, abundant cytoplasm, displacing the normal lymphoid "
