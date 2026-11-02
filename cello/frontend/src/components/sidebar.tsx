@@ -5,7 +5,9 @@ import Comments from "./comments";
 import TriagePanel from "./TriagePanel";
 import AskPanel, { AskEntry } from "./AskPanel";
 import ImpactStrip from "./ImpactStrip";
-import { Heatmap } from "../api/mlApi";
+import ScanPanel from "./ScanPanel";
+import { Heatmap, ScanResult } from "../api/mlApi";
+import { isAskItem, isScanItem, useGallery } from "../api/galleryApi";
 import { OverlayOptions, TileSelection } from "./HeatmapOverlay";
 
 interface SidebarProps {
@@ -20,9 +22,13 @@ interface SidebarProps {
   selectedTile: TileSelection | null;
   askHistory: AskEntry[];
   onAsk: (entry: AskEntry) => void;
+  /** Verdict from the demo-gallery Scan panel (tints the viewer); null clears it. */
+  onScanVerdict: (v: ScanResult["verdict"] | null) => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ selectedImageId, onImageSelect, heatmap, onHeatmap, overlay, onOverlay, hasGroundTruth, commentsRefreshKey, selectedTile, askHistory, onAsk }) => {
+const Sidebar: React.FC<SidebarProps> = ({ selectedImageId, onImageSelect, heatmap, onHeatmap, overlay, onOverlay, hasGroundTruth, commentsRefreshKey, selectedTile, askHistory, onAsk, onScanVerdict }) => {
+  const { byId } = useGallery();
+  const galleryItem = selectedImageId ? byId[selectedImageId] ?? null : null;
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -35,8 +41,9 @@ const Sidebar: React.FC<SidebarProps> = ({ selectedImageId, onImageSelect, heatm
       </div>
       <FileUpload selectedImageId={selectedImageId} onImageSelect={onImageSelect} />
       <ImpactStrip summary={heatmap?.summary ?? null} history={askHistory} />
+      {isScanItem(galleryItem) && <ScanPanel item={galleryItem} onVerdict={onScanVerdict} />}
       <TriagePanel imageId={selectedImageId} heatmap={heatmap} onHeatmap={onHeatmap} overlay={overlay} onOverlay={onOverlay} hasGroundTruth={hasGroundTruth} />
-      <AskPanel imageId={selectedImageId} selection={selectedTile} heatmap={heatmap} history={askHistory} onAnswer={onAsk} />
+      <AskPanel imageId={selectedImageId} selection={selectedTile} heatmap={heatmap} history={askHistory} onAnswer={onAsk} galleryItem={isAskItem(galleryItem) ? galleryItem : null} />
       <Comments imageId={selectedImageId} refreshKey={commentsRefreshKey} />
     </aside>
   );

@@ -34,9 +34,11 @@ Configuration (environment):
     PATHFRONTIER_VLM_MAX_TILES  cap on VLM calls per slide job (default 200)
     PATHFRONTIER_GALLERY_DIR     demo gallery dir (default data/demo_gallery)
     PATHFRONTIER_SCAN_MODEL      Fireworks model id of the fine-tuned Camelyon17 classifier used by
-                                 POST /scan (unset -> probe only); PATHFRONTIER_SCAN_API_KEY (default
-                                 FIREWORKS_API_KEY), PATHFRONTIER_SCAN_CUTOFF (default 0.1068),
-                                 PATHFRONTIER_SCAN_PROBE (default the camelyon17 Phikon-v2 probe)
+                                 POST /scan; PATHFRONTIER_SCAN_API_KEY (default FIREWORKS_API_KEY),
+                                 PATHFRONTIER_SCAN_CUTOFF (default 0.1068), PATHFRONTIER_SCAN_PROBE
+                                 (default the camelyon17 Phikon-v2 probe). Unset -> the PathVQA
+                                 fine-tune (PATHFRONTIER_VQA_MODEL) decides via "is tumor present?"
+                                 when a key is present, else the probe alone (/health scan_backend)
 
 Slide `level`: an int DZI level, "max" (full res), "auto" (max_level - 2, ~1 um/px for a 40x
 slide) or null -> max_level - 1 (half res; 4x fewer tiles than full res, a good speed/detail
@@ -280,6 +282,12 @@ def _scan_vlm(image, model: str, api_key: str | None, cutoff: float) -> dict:
     """gallery.vlm_scan wrapper for POST /scan (same prompt v2 setup as _vlm_classify).
     Monkeypatched in tests."""
     return gallery.vlm_scan(image, model, api_key, cutoff)
+
+
+def _scan_vqa(image, model: str, api_key: str | None) -> dict:
+    """gallery.vqa_scan wrapper for POST /scan when no scan model is set: the PathVQA fine-tune
+    answers "is tumor present?" with logprobs. Monkeypatched in tests."""
+    return gallery.vqa_scan(image, model, api_key)
 
 
 # --------------------------------------------------------------------------------------
@@ -662,6 +670,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "low": settings.low,
             "high": settings.high,
             "scan_model": settings.scan_model if scan_engine.vlm_enabled() else None,
+            "scan_backend": scan_engine.scan_backend(),
             "gallery": gallery.counts(gallery.load_manifest(settings.gallery_dir)),
         }
 
@@ -799,7 +808,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.fake:
             scorer()  # 503 until the encoder is loaded
         return scan_engine.cached_scan(it, lambda: gallery.open_image(settings.gallery_dir, it),
-                                       vlm_fn=_scan_vlm)
+                                       vlm_fn=_scan_vlm, vqa_fn=_scan_vqa)
 
     vqa_cache = _VQACache()
     app.state.vqa_cache = vqa_cache

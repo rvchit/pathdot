@@ -8,14 +8,17 @@
           copied from pathvqa_kit/data/images/pathvqa.
 
 Idempotent: an existing manifest is kept unless --force. Served by GET /gallery (pathfrontier.serve).
+After the manifest, every gallery image is also tiled into a DZI pyramid under tiles/<id>/ (skipped
+when the .dzi exists unless --force) so the slide viewer lists scan_1..3 / ask_1..3 as slides.
 
-    .venv/bin/python scripts/make_demo_gallery.py [--force]
+    .venv/bin/python scripts/make_demo_gallery.py [--force] [--tiles-dir tiles]
 """
 from __future__ import annotations
 
 import csv
 import io
 import json
+import os
 import shutil
 import sys
 import tarfile
@@ -28,7 +31,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pathfrontier import config, gallery
+from pathfrontier import config, dzi, gallery
 
 TILE_PX = 224
 N_TUMOR, N_NORMAL, N_ASK = 2, 1, 3
@@ -229,6 +232,24 @@ def pick_pathvqa() -> list[dict]:
 
 
 # --------------------------------------------------------------------------------------
+def tile_gallery(manifest: dict, gallery_dir: Path, tiles_dir: Path, force: bool = False) -> None:
+    """DZI-tile each gallery image into tiles/<id>/ (ids == gallery ids) for the slide viewer."""
+    for it in manifest["scan"] + manifest["ask"]:
+        image_id = it["id"]
+        if dzi.find_dzi(tiles_dir, image_id) is not None and not force:
+            typer.echo(f"  tiles/{image_id}: exists (skip; --force to rebuild)")
+            continue
+        src = gallery_dir / it["file"]
+        if not src.is_file():
+            typer.echo(f"  tiles/{image_id}: missing image {src}; skipped")
+            continue
+        with Image.open(src) as im:
+            im.load()
+            out = dzi.tile_image_pillow(im, tiles_dir, image_id)
+        info = dzi.parse_dzi(out)
+        typer.echo(f"  tiles/{image_id}: {info['width']}x{info['height']}, max_level={info['max_level']}")
+
+
 def summary(manifest: dict) -> str:
     lines = [(f"gallery: {len(manifest['scan'])} scan + {len(manifest['ask'])} ask items "
               f"(scan source: {manifest.get('source')})")]
@@ -248,13 +269,20 @@ def main(
     out_dir: str = typer.Option("", help="default: data/demo_gallery (PATHFRONTIER_GALLERY_DIR)"),
     shard_dir: str = typer.Option("", help="default: data/camelyon17_wilds_test"),
     force: bool = typer.Option(False, "--force", help="rebuild even if the manifest exists"),
+    tiles_dir: str = typer.Option("", help="DZI output root (default: tiles/, PATHFRONTIER_TILES_DIR)"),
+    no_tiles: bool = typer.Option(False, "--no-tiles", help="skip tiling the gallery images for the viewer"),
 ) -> None:
     out = Path(out_dir) if out_dir else gallery.default_gallery_dir()
     shards = Path(shard_dir) if shard_dir else config.DATA_DIR / "camelyon17_wilds_test"
+    tiles = Path(tiles_dir or os.getenv("PATHFRONTIER_TILES_DIR") or config.ROOT / "tiles")
     mpath = out / gallery.MANIFEST_NAME
     if mpath.is_file() and not force:
         typer.echo(f"{mpath} exists (use --force to rebuild)")
-        typer.echo(summary(gallery.load_manifest(out)))
+        manifest = gallery.load_manifest(out)
+        typer.echo(summary(manifest))
+        if not no_tiles:
+            typer.echo(f"tiling gallery images into {tiles} ...")
+            tile_gallery(manifest, out, tiles)
         return
 
     typer.echo(f"indexing shards in {shards} ...")
@@ -282,6 +310,9 @@ def main(
         json.dump(manifest, f, indent=2)
     typer.echo(f"wrote {mpath}")
     typer.echo(summary(manifest))
+    if not no_tiles:
+        typer.echo(f"tiling gallery images into {tiles} ...")
+        tile_gallery(manifest, out, tiles, force=force)
 
 
 if __name__ == "__main__":

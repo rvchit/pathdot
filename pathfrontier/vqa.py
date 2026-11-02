@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 import time
 from typing import Any
 
@@ -86,6 +87,32 @@ def canned_answer(question: str) -> str:
     return "tumor tissue"
 
 
+def p_yes_from_logprobs(logprobs: Any) -> float | None:
+    """P("yes") renormalised over {"yes", "no"} from the first generated token's top_logprobs.
+
+    Tokens match case-insensitively, with or without a leading space / trailing punctuation
+    (" Yes", "yes", "No."). None when logprobs are absent or name neither word.
+    """
+    content = getattr(logprobs, "content", None)
+    if content is None and isinstance(logprobs, dict):
+        content = logprobs.get("content")
+    if not content:
+        return None
+    first = content[0]
+    cands = getattr(first, "top_logprobs", None)
+    if cands is None and isinstance(first, dict):
+        cands = first.get("top_logprobs")
+    mass = {"yes": 0.0, "no": 0.0}
+    for cand in cands or []:
+        tok = getattr(cand, "token", None) if not isinstance(cand, dict) else cand.get("token")
+        lp = getattr(cand, "logprob", None) if not isinstance(cand, dict) else cand.get("logprob")
+        word = str(tok or "").strip().strip(".,!\"'").lower()
+        if word in mass and lp is not None:
+            mass[word] += math.exp(float(lp))
+    total = mass["yes"] + mass["no"]
+    return mass["yes"] / total if total > 0 else None
+
+
 def make_client(api_key: str | None = None, base_url: str | None = None) -> Any:
     import openai
 
@@ -95,22 +122,32 @@ def make_client(api_key: str | None = None, base_url: str | None = None) -> Any:
 
 
 def answer_question(img: Image.Image, question: str, model: str = DEFAULT_VQA_MODEL,
-                    client: Any = None, fake: bool = False) -> dict:
+                    client: Any = None, fake: bool = False, logprobs: bool = False,
+                    top_logprobs: int = 5, max_tokens: int | None = None) -> dict:
     """One (image, question) -> {"answer", "model", "latency_ms", "cost_usd", "tokens_in",
-    "tokens_out"}. Raises VQAError when the upstream call fails."""
+    "tokens_out"}. With ``logprobs=True`` the dict also carries "p_yes" (see
+    `p_yes_from_logprobs`; None when the API returned none). Raises VQAError when the upstream
+    call fails."""
     t0 = time.perf_counter()
     if fake:
-        return {"answer": canned_answer(question), "model": "fake/vqa",
-                "latency_ms": (time.perf_counter() - t0) * 1000.0, "cost_usd": 0.0,
-                "tokens_in": 0, "tokens_out": 0}
+        out = {"answer": canned_answer(question), "model": "fake/vqa",
+               "latency_ms": (time.perf_counter() - t0) * 1000.0, "cost_usd": 0.0,
+               "tokens_in": 0, "tokens_out": 0}
+        if logprobs:
+            out["p_yes"] = None
+        return out
     client = client or make_client()
+    kwargs: dict[str, Any] = {}
+    if logprobs:
+        kwargs.update(logprobs=True, top_logprobs=int(top_logprobs))
     try:
         resp = client.chat.completions.create(
             model=model,
             messages=build_messages(img, question),
             temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
+            max_tokens=max_tokens or MAX_TOKENS,
             extra_body={"reasoning_effort": "none"},  # REQUIRED: Qwen3.5 thinks otherwise
+            **kwargs,
         )
     except Exception as e:  # any SDK/HTTP error -> 502 with the message
         raise VQAError(f"{type(e).__name__}: {e}"[:500]) from e
@@ -122,5 +159,9 @@ def answer_question(img: Image.Image, question: str, model: str = DEFAULT_VQA_MO
     tin = int(getattr(usage, "prompt_tokens", 0) or 0)
     tout = int(getattr(usage, "completion_tokens", 0) or 0)
     pin, pout = price_per_token(model)
-    return {"answer": answer, "model": model, "latency_ms": latency_ms,
-            "cost_usd": tin * pin + tout * pout, "tokens_in": tin, "tokens_out": tout}
+    out = {"answer": answer, "model": model, "latency_ms": latency_ms,
+           "cost_usd": tin * pin + tout * pout, "tokens_in": tin, "tokens_out": tout}
+    if logprobs:
+        out["p_yes"] = p_yes_from_logprobs(getattr(choice, "logprobs", None)
+                                           if choice is not None else None)
+    return out

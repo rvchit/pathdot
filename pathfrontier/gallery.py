@@ -16,7 +16,17 @@ The gallery lives in ``data/demo_gallery/`` (``PATHFRONTIER_GALLERY_DIR``) and i
            as serve._vlm_classify does, p_tumor from logprobs, verdict = p_tumor >= cutoff
            (``PATHFRONTIER_SCAN_CUTOFF``, default results/camelyon17/cutoff_qwen3p5-9b_ft_v2.json)
 
-The VLM decides when it is configured and succeeds; otherwise the probe decides.
+Decision order (``scan_backend`` in GET /health):
+
+    camelyon-lora  PATHFRONTIER_SCAN_MODEL set (+ key): the Camelyon17 one-word classifier above
+    pathvqa-lora   else the PathVQA fine-tune (``Settings.vqa_model``, vqa.DEFAULT_VQA_MODEL) is
+                   asked the fixed question "is tumor present?" through the same client/prompt
+                   as POST /vqa, with first-token logprobs: p_tumor = P("yes") over {yes, no},
+                   verdict = tumor iff the answer starts with "yes"
+    probe          else (or PATHFRONTIER_FAKE=1 -> "fake")
+
+The chosen VLM decides when it succeeds; on any VLM error the probe decides (the probe always
+runs as the second opinion).
 """
 from __future__ import annotations
 
@@ -38,6 +48,10 @@ BUILD_CMD = ".venv/bin/python scripts/make_demo_gallery.py"
 DEFAULT_SCAN_PROBE = config.RESULTS_DIR / "camelyon17" / "probe_phikon-v2_camelyon17_c17train.joblib"
 DEFAULT_SCAN_CUTOFF = 0.1068   # results/camelyon17/cutoff_qwen3p5-9b_ft_v2.json (slide-29 dev set)
 PROBE_THRESHOLD = 0.5
+VQA_SCAN_QUESTION = "is tumor present?"
+VQA_SCAN_MAX_TOKENS = 4
+VQA_SCAN_TOP_LOGPROBS = 5
+VQA_SCAN_SOURCE = "pathvqa-lora"
 SCAN_DATASET = "camelyon17"    # binary normal/tumor label space for the v2 prompt
 MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".webp": "image/webp"}
@@ -174,6 +188,39 @@ def vlm_scan(image, model: str, api_key: str | None, cutoff: float) -> dict:
     }
 
 
+def vqa_scan(image, model: str, api_key: str | None) -> dict:
+    """One tile through the PathVQA fine-tune: "is tumor present?" -> yes/no with logprobs.
+
+    p_tumor = P("yes") renormalised over {yes, no} from the first token's top_logprobs; when the
+    API returns no logprobs it is 0.95 for "yes" / 0.05 for "no". verdict = tumor iff the answer
+    starts with "yes" (p_tumor >= 0.5 when the answer is neither). Raises on any API failure.
+    """
+    from pathfrontier import vqa
+
+    client = vqa.make_client(api_key=api_key) if api_key else None
+    r = vqa.answer_question(image, VQA_SCAN_QUESTION, model=model, client=client, logprobs=True,
+                            top_logprobs=VQA_SCAN_TOP_LOGPROBS, max_tokens=VQA_SCAN_MAX_TOKENS)
+    answer = (r.get("answer") or "").strip()
+    word = answer.lower()
+    says_yes = word.startswith("yes")
+    says_no = word.startswith("no")
+    p = r.get("p_yes")
+    if p is None:
+        p = 0.95 if says_yes else 0.05 if says_no else 0.5
+    p = float(p)
+    verdict = "tumor" if (says_yes or (not says_no and p >= 0.5)) else "normal"
+    return {
+        "verdict": verdict,
+        "p_tumor": p,
+        "answer": answer,
+        "latency_ms": float(r.get("latency_ms", 0.0)),
+        "cost_usd": float(r.get("cost_usd", 0.0)),
+        "model": model,
+        "question": VQA_SCAN_QUESTION,
+        "source": VQA_SCAN_SOURCE,
+    }
+
+
 class ScanEngine:
     """Lazy holder for the scan probe + per-id result cache. One per app."""
 
@@ -246,7 +293,26 @@ class ScanEngine:
         return (getattr(self.settings, "scan_api_key", None)
                 or os.getenv("FIREWORKS_API_KEY", config.FIREWORKS_API_KEY) or "")
 
-    def scan(self, item: dict, image, vlm_fn=None) -> dict:
+    def vqa_api_key(self) -> str:
+        return os.getenv("FIREWORKS_API_KEY", config.FIREWORKS_API_KEY) or ""
+
+    def vqa_enabled(self) -> bool:
+        """The PathVQA fine-tune decides when no Camelyon scan model is configured."""
+        s = self.settings
+        if getattr(s, "fake", False) or self.vlm_enabled():
+            return False
+        return bool(getattr(s, "vqa_model", None)) and bool(self.vqa_api_key())
+
+    def scan_backend(self) -> str:
+        if getattr(self.settings, "fake", False):
+            return "fake"
+        if self.vlm_enabled():
+            return "camelyon-lora"
+        if self.vqa_enabled():
+            return VQA_SCAN_SOURCE
+        return "probe"
+
+    def scan(self, item: dict, image, vlm_fn=None, vqa_fn=None) -> dict:
         """Decision dict for one gallery item (no caching here; see `cached_scan`)."""
         s = self.settings
         probe = self.probe_scan(item, image)
@@ -258,6 +324,13 @@ class ScanEngine:
             except Exception as e:  # noqa: BLE001 - VLM failure -> probe decides, report it
                 log.warning("scan VLM failed for %s: %s", item["id"], e)
                 vlm = {"error": f"{type(e).__name__}: {e}"[:300]}
+        elif self.vqa_enabled():
+            fn = vqa_fn or vqa_scan
+            try:
+                vlm = fn(image, s.vqa_model, self.vqa_api_key())
+            except Exception as e:  # noqa: BLE001 - VQA failure -> probe decides, report it
+                log.warning("scan VQA failed for %s: %s", item["id"], e)
+                vlm = {"error": f"{type(e).__name__}: {e}"[:300], "source": VQA_SCAN_SOURCE}
         decider = vlm if vlm and "error" not in vlm else probe
         decided_by = "vlm" if decider is vlm else "probe"
         p = float(decider["p_tumor"])
@@ -277,10 +350,10 @@ class ScanEngine:
             "vlm": vlm,
         }
 
-    def cached_scan(self, item: dict, image_loader, vlm_fn=None) -> dict:
+    def cached_scan(self, item: dict, image_loader, vlm_fn=None, vqa_fn=None) -> dict:
         hit = self.cache.get(item["id"])
         if hit is not None:
             return dict(hit, cached=True)
-        out = self.scan(item, image_loader(), vlm_fn)
+        out = self.scan(item, image_loader(), vlm_fn, vqa_fn)
         self.cache[item["id"]] = out
         return dict(out, cached=False)

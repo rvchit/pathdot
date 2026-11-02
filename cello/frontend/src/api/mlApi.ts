@@ -83,6 +83,8 @@ export interface MlHealth {
   vqa?: string | null;
   /** Model id used by POST /scan (demo gallery), or null when not configured. */
   scan_model?: string | null;
+  /** Which backend decides POST /scan: a fine-tuned LoRA, the Phikon-v2 probe alone, or the fake service. */
+  scan_backend?: "camelyon-lora" | "pathvqa-lora" | "probe" | "fake";
   device?: string;
 }
 
@@ -200,6 +202,16 @@ export interface ScanOpinion {
   model: string;
 }
 
+/** The fine-tuned VLM's opinion on a gallery tile (POST /scan `vlm`). */
+export interface ScanVlmOpinion extends ScanOpinion {
+  answer: string;
+  cost_usd: number;
+  /** Prompt the VLM was asked, when the backend reports it. */
+  question?: string;
+  /** Which LoRA produced the opinion. */
+  source?: "pathvqa-lora" | "camelyon-lora";
+}
+
 export interface ScanResult {
   id: string;
   verdict: "tumor" | "normal";
@@ -211,7 +223,7 @@ export interface ScanResult {
   cost_usd: number;
   truth: { label: 0 | 1; label_name: string };
   probe: ScanOpinion | null;
-  vlm: (ScanOpinion & { answer: string; cost_usd: number }) | { error: string } | null;
+  vlm: ScanVlmOpinion | { error: string } | null;
   cached: boolean;
 }
 

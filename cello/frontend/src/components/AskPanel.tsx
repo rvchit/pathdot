@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { BACKEND_URL, errorMessage } from "../api/client";
-import { Heatmap, HeatmapTile, VqaResponse, askTile, mlHealth } from "../api/mlApi";
+import { GalleryAskItem, GalleryQuestion, Heatmap, HeatmapTile, VqaResponse, askGallery, askTile, mlHealth } from "../api/mlApi";
 import { DECISION_STYLE, TileSelection } from "./HeatmapOverlay";
 
 /** One answered question in this browser session. */
@@ -11,6 +11,11 @@ export interface AskEntry extends VqaResponse {
   x: number;
   y: number;
   at: number;
+  /** True when the question was about the whole demo-gallery image (no tile selected). */
+  whole?: boolean;
+  /** Dataset reference answer when the question came from the gallery manifest. */
+  expected?: string | null;
+  qtype?: GalleryQuestion["qtype"];
 }
 
 interface Props {
@@ -19,13 +24,31 @@ interface Props {
   heatmap: Heatmap | null;
   history: AskEntry[];
   onAnswer: (entry: AskEntry) => void;
+  /** The demo-gallery "ask" item for the open slide, when it is one (dataset questions + whole-image asks). */
+  galleryItem?: GalleryAskItem | null;
 }
 
 const PRESETS = ["Is tumor present?", "What tissue is this?", "Is there necrosis?", "What does this image show?", "Are mitotic figures present?"];
 
 const UNAVAILABLE = "assistant unavailable";
 
-const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAnswer }) => {
+/** Same normalisation as the /demo page: lowercase, strip punctuation; closed questions compare the first word. */
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+export const answersMatch = (got: string, expected: string, qtype: GalleryQuestion["qtype"]): boolean => {
+  const a = norm(got);
+  const b = norm(expected);
+  if (!a || !b) return false;
+  if (qtype === "closed") return a.split(" ")[0] === b.split(" ")[0];
+  return a === b;
+};
+
+const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAnswer, galleryItem = null }) => {
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +91,11 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
   }, [imageId, selection?.level, selection?.x, selection?.y]);
 
   const available = model !== null;
-  const canAsk = !!imageId && !!selection && available && !busy;
+  // Gallery images can be asked about as a whole; other slides need a tile.
+  const wholeImage = !!galleryItem && !selection;
+  const hasTarget = !!selection || !!galleryItem;
+  const canAsk = !!imageId && hasTarget && available && !busy;
+  const presets = galleryItem ? galleryItem.questions.map((q) => q.question) : PRESETS;
 
   // The heatmap cell for this tile, if the selection is at the heatmap's level.
   const tile: HeatmapTile | null =
@@ -76,17 +103,30 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
 
   const ask = async (q: string) => {
     const text = q.trim();
-    if (!text || !imageId || !selection || !available || busy) return;
+    if (!text || !imageId || !hasTarget || !available || busy) return;
     setQuestion(text);
     setError(null);
     setBusy(true);
     const ac = new AbortController();
     abortRef.current = ac;
     const sel = selection;
+    const ref = galleryItem?.questions.find((q) => q.question.trim().toLowerCase() === text.toLowerCase()) ?? null;
     try {
-      const res = await askTile({ image_id: imageId, level: sel.level, x: sel.x, y: sel.y, question: text });
-      if (ac.signal.aborted) return;
-      const entry: AskEntry = { ...res, imageId, level: sel.level, x: sel.x, y: sel.y, at: Date.now() };
+      let entry: AskEntry;
+      if (sel) {
+        const res = await askTile({ image_id: imageId, level: sel.level, x: sel.x, y: sel.y, question: text });
+        if (ac.signal.aborted) return;
+        entry = { ...res, imageId, level: sel.level, x: sel.x, y: sel.y, at: Date.now() };
+      } else {
+        // Demo-gallery image with no tile selected: ask about the whole image via {gallery_id, question}.
+        const res = await askGallery(galleryItem!.id, text);
+        if (ac.signal.aborted) return;
+        entry = { tokens_in: 0, tokens_out: 0, ...res, imageId, level: 0, x: 0, y: 0, at: Date.now(), whole: true };
+      }
+      if (ref) {
+        entry.expected = ref.answer;
+        entry.qtype = ref.qtype;
+      }
       setLast(entry);
       onAnswer(entry);
     } catch (err) {
@@ -96,7 +136,7 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
         setModel(null);
         setError(UNAVAILABLE);
       } else if (status === 404) {
-        setError(`No tile at level ${sel.level}, (${sel.x}, ${sel.y}) for this slide.`);
+        setError(sel ? `No tile at level ${sel.level}, (${sel.x}, ${sel.y}) for this slide.` : `Gallery image ${imageId} not found on the ML service.`);
       } else if (status === 502) {
         setError(`The assistant model failed to answer: ${errorMessage(err)}`);
       } else {
@@ -128,7 +168,14 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
           {model === null && <div className="notice warn">{UNAVAILABLE} — the ML service reports no PathVQA model (<code>GET /ml/health</code> → <code>vqa: null</code>).</div>}
 
           {!selection || !thumb ? (
-            <div className="ask-empty">Click a tile on the slide to ask about it</div>
+            wholeImage ? (
+              <div className="ask-empty">
+                Asking about the <strong>whole image</strong>
+                <div className="ask-whole">PathVQA image · click a tile to ask about a region instead</div>
+              </div>
+            ) : (
+              <div className="ask-empty">Click a tile on the slide to ask about it</div>
+            )
           ) : (
             <div className="ask-tile">
               <img className="ask-thumb" src={thumb} alt={`tile ${selection.x},${selection.y}`} width={96} height={96} />
@@ -149,8 +196,8 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
             </div>
           )}
 
-          <div className="chips">
-            {PRESETS.map((p) => (
+          <div className={`chips ${galleryItem ? "dataset" : ""}`}>
+            {presets.map((p) => (
               <button key={p} className={`chip ${question === p ? "chip-active" : ""}`} onClick={() => ask(p)} disabled={!canAsk} title={p}>
                 {p}
               </button>
@@ -162,12 +209,12 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
               className="ask-input"
               type="text"
               value={question}
-              placeholder={selection ? "Ask anything about this tile…" : "Select a tile first"}
+              placeholder={selection ? "Ask anything about this tile…" : wholeImage ? "Ask anything about this image…" : "Select a tile first"}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") ask(question);
               }}
-              disabled={!selection || !available || busy}
+              disabled={!hasTarget || !available || busy}
             />
             <button className="btn btn-primary" onClick={() => ask(question)} disabled={!canAsk || !question.trim()}>
               {busy ? "Asking…" : "Send"}
@@ -180,6 +227,12 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
             <div className="ask-answer">
               <div className="ask-q muted">{last.question}</div>
               <div className="ask-a">{last.answer}</div>
+              {last.expected != null && last.qtype && (
+                <div className="ask-expected">
+                  expected: <strong>{last.expected}</strong>{" "}
+                  {answersMatch(last.answer, last.expected, last.qtype) ? <span className="match">✓ matches</span> : <span className="nomatch">○ differs</span>}
+                </div>
+              )}
               <div className="ask-meta">
                 {Math.round(last.latency_ms)} ms · ${last.cost_usd.toFixed(4)}
                 {last.cached ? " · cached" : ""}
@@ -195,7 +248,9 @@ const AskPanel: React.FC<Props> = ({ imageId, selection, heatmap, history, onAns
                   <span className="ask-h-q">{h.question}</span>
                   <span className="ask-h-a">{h.answer}</span>
                   <span className="ask-h-meta">
-                    {h.imageId !== imageId ? `${h.imageId} · ` : ""}tile {h.x},{h.y} · {Math.round(h.latency_ms)} ms
+                    {h.imageId !== imageId ? `${h.imageId} · ` : ""}
+                    {h.whole ? "whole image" : `tile ${h.x},${h.y}`} · {Math.round(h.latency_ms)} ms
+                    {h.expected != null && h.qtype ? (answersMatch(h.answer, h.expected, h.qtype) ? " · ✓" : " · ○") : ""}
                   </span>
                 </li>
               ))}

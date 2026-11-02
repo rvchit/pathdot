@@ -1,0 +1,41 @@
+/* Extras for the slide viewer: demo-gallery grouping, the Scan panel and the verdict tint. */
+
+/* ---------- slide list grouping ---------- */
+.slide-group-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 6px 0 2px; }
+.slide-group-head:first-child { margin-top: 0; }
+.slide-item-label { display: block; }
+.slide-item-sub { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
+.slide-list.grouped { max-height: 260px; }
+
+/* ---------- scan panel ---------- */
+.scan-panel .verdict { font-size: 22px; padding: 10px 16px; }
+.scan-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.scan-steps li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.scan-steps li.active { color: var(--text); }
+.scan-steps li.done { color: #86efac; }
+.scan-step-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: 0 0 auto; }
+.scan-steps li.active .scan-step-dot { background: var(--accent); animation: scan-pulse 0.9s ease-in-out infinite; }
+.scan-steps li.done .scan-step-dot { background: var(--neg); }
+@keyframes scan-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+.scan-result { display: flex; flex-direction: column; gap: 8px; }
+.scan-model { font-size: 12px; color: var(--muted); }
+.scan-model strong { color: var(--text); }
+.scan-panel .opinion-table { width: 100%; }
+.scan-panel .opinion-table td.muted { color: var(--muted); }
+.scan-hint { font-size: 12px; color: var(--muted); }
+
+/* ---------- whole-slide verdict tint (ViewerPage, over the OSD container) ---------- */
+.verdict-tint { position: absolute; inset: 0; top: 41px; /* below .viewer-toolbar */ pointer-events: none; z-index: 3; opacity: 0; transition: opacity 600ms ease; }
+.verdict-tint.show { opacity: 1; }
+.verdict-tint.tumor { background: rgba(220, 38, 38, 0.22); box-shadow: inset 0 0 0 4px rgba(220, 38, 38, 0.7); }
+.verdict-tint.normal { background: rgba(34, 197, 94, 0.18); box-shadow: inset 0 0 0 4px rgba(34, 197, 94, 0.7); }
+.verdict-tint-label { position: absolute; left: 12px; top: 12px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; background: rgba(11, 13, 16, 0.75); }
+.verdict-tint.tumor .verdict-tint-label { color: #fca5a5; }
+.verdict-tint.normal .verdict-tint-label { color: #86efac; }
+
+/* ---------- ask panel: dataset questions ---------- */
+.ask-panel .chips.dataset .chip { white-space: normal; text-align: left; line-height: 1.35; }
+.ask-whole { font-size: 12px; color: var(--muted); }
+.ask-expected { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.ask-expected .match { color: #86efac; font-weight: 700; }
+.ask-expected .nomatch { color: var(--muted); font-weight: 700; }

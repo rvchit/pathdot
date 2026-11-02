@@ -3,8 +3,9 @@ import ImageViewer from "./OSDviewer";
 import Sidebar from "./sidebar";
 import { DEFAULT_OVERLAY, OverlayOptions, TileSelection } from "./HeatmapOverlay";
 import { AskEntry } from "./AskPanel";
-import { Heatmap } from "../api/mlApi";
+import { Heatmap, ScanResult } from "../api/mlApi";
 import { DziInfo, GroundTruth, getGroundTruth } from "../api/slidesApi";
+import "./viewer-extras.css";
 
 interface ViewerPageProps {
   selectedImageId?: string;
@@ -21,12 +22,15 @@ const ViewerPage: React.FC<ViewerPageProps> = ({ selectedImageId, setSelectedIma
   const [selectedTile, setSelectedTile] = useState<TileSelection | null>(null);
   // Session-wide Q&A history (feeds the AskPanel list and the ImpactStrip stats).
   const [askHistory, setAskHistory] = useState<AskEntry[]>([]);
+  // Verdict from the demo-gallery Scan panel; tints the whole slide red/green.
+  const [scanVerdict, setScanVerdict] = useState<ScanResult["verdict"] | null>(null);
 
   // Reset per-slide state when the slide changes.
   useEffect(() => {
     setHeatmap(null);
     setGroundTruth(null);
     setSelectedTile(null);
+    setScanVerdict(null);
     setOverlay((o) => ({ ...o, showGroundTruth: false }));
   }, [selectedImageId]);
 
@@ -51,7 +55,7 @@ const ViewerPage: React.FC<ViewerPageProps> = ({ selectedImageId, setSelectedIma
 
   return (
     <div className="app-shell">
-      <main className="viewer-main">
+      <main className="viewer-main" style={{ position: "relative" }}>
         <ImageViewer
           imageId={selectedImageId}
           heatmap={heatmap}
@@ -62,6 +66,10 @@ const ViewerPage: React.FC<ViewerPageProps> = ({ selectedImageId, setSelectedIma
           selectedTile={selectedTile}
           onSelectTile={setSelectedTile}
         />
+        {/* Whole-slide verdict tint (demo gallery scan). Sits over the viewer; clicks pass through. */}
+        <div className={`verdict-tint ${scanVerdict ?? ""} ${scanVerdict ? "show" : ""}`} aria-hidden={!scanVerdict}>
+          {scanVerdict && <span className="verdict-tint-label">{scanVerdict === "tumor" ? "TUMOR DETECTED" : "NO TUMOR"}</span>}
+        </div>
       </main>
       <Sidebar
         selectedImageId={selectedImageId}
@@ -75,6 +83,7 @@ const ViewerPage: React.FC<ViewerPageProps> = ({ selectedImageId, setSelectedIma
         selectedTile={selectedTile}
         askHistory={askHistory}
         onAsk={(e) => setAskHistory((h) => [e, ...h])}
+        onScanVerdict={setScanVerdict}
       />
     </div>
   );

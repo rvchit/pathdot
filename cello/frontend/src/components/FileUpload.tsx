@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/client";
 import { listImages, uploadLocal, uploadMode } from "../api/slidesApi";
 import { uploadToS3 } from "../api/fileuploadApi";
+import { galleryLabel, useGallery } from "../api/galleryApi";
 
 interface Props {
   selectedImageId?: string;
@@ -17,6 +18,11 @@ const FileUpload: React.FC<Props> = ({ selectedImageId, onImageSelect }) => {
   const [uploadPct, setUploadPct] = useState(0);
   const [hint, setHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { gallery, byId } = useGallery();
+
+  // Demo gallery slides first (scan tiles, then ask images, in gallery order), then everything else.
+  const demoIds = gallery ? [...gallery.scan, ...gallery.ask].map((it) => it.id).filter((id) => images.includes(id)) : [];
+  const otherIds = images.filter((id) => !byId[id]);
 
   const refresh = async () => {
     try {
@@ -73,8 +79,18 @@ const FileUpload: React.FC<Props> = ({ selectedImageId, onImageSelect }) => {
           No tiled slides yet. Run <code>make tile</code> to build the demo mosaic, or upload an image below.
         </div>
       )}
-      <ul className="slide-list">
-        {images.map((id) => (
+      <ul className={`slide-list ${demoIds.length ? "grouped" : ""}`}>
+        {demoIds.length > 0 && <li className="slide-group-head">Demo slides</li>}
+        {demoIds.map((id) => (
+          <li key={id}>
+            <button className={`slide-item ${selectedImageId === id ? "selected" : ""}`} onClick={() => onImageSelect(id)} title={id}>
+              <span className="slide-item-label">{galleryLabel(byId[id])}</span>
+              <span className="slide-item-sub">{id}</span>
+            </button>
+          </li>
+        ))}
+        {demoIds.length > 0 && otherIds.length > 0 && <li className="slide-group-head">Other slides</li>}
+        {otherIds.map((id) => (
           <li key={id}>
             <button className={`slide-item ${selectedImageId === id ? "selected" : ""}`} onClick={() => onImageSelect(id)}>
               {id}

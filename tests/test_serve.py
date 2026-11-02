@@ -392,6 +392,7 @@ def test_gallery_listing_and_images(gallery_client):
 
     h = gallery_client.get("/health").json()
     assert h["gallery"] == {"scan": 3, "ask": 1} and h["scan_model"] is None
+    assert h["scan_backend"] == "fake"
 
 
 def test_scan_fake_agrees_with_truth(gallery_client):
@@ -451,6 +452,98 @@ def test_scan_vlm_path_monkeypatched(env, tmp_path, monkeypatch):
     j2 = eng.scan(item, im, vlm_fn=serve._scan_vlm)
     assert j2["decided_by"] == "probe" and j2["verdict"] == "normal"
     assert "deployment gone" in j2["vlm"]["error"]
+
+
+def test_p_yes_from_logprobs():
+    """P(yes) renormalised over {yes, no}; tokens match case-insensitively with/without space."""
+    from types import SimpleNamespace as NS
+
+    from pathfrontier import vqa
+
+    def lp(cands):
+        return NS(content=[NS(top_logprobs=[NS(token=t, logprob=np.log(p)) for t, p in cands])])
+
+    assert vqa.p_yes_from_logprobs(None) is None
+    assert vqa.p_yes_from_logprobs(NS(content=[])) is None
+    assert vqa.p_yes_from_logprobs(lp([("tumor", 0.5), ("normal", 0.5)])) is None
+    p = vqa.p_yes_from_logprobs(lp([("Yes", 0.6), (" no", 0.2), ("No.", 0.1), ("maybe", 0.1)]))
+    assert abs(p - 0.6 / 0.9) < 1e-9
+    # dict-shaped payloads (raw JSON) work too
+    assert vqa.p_yes_from_logprobs({"content": [{"top_logprobs": [
+        {"token": " yes", "logprob": float(np.log(0.9))}]}]}) == 1.0
+
+
+def test_scan_vqa_backend_monkeypatched(env, tmp_path, monkeypatch):
+    """No scan model + a VQA model + key -> the PathVQA fine-tune decides /scan via "is tumor
+    present?" with first-token logprobs; the probe is reported as the second opinion."""
+    from types import SimpleNamespace as NS
+
+    gdir = make_gallery(tmp_path)
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-key")
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kw):
+            calls.append(kw)
+            lp = NS(content=[NS(token="Yes", top_logprobs=[
+                NS(token="Yes", logprob=float(np.log(0.8))),
+                NS(token=" no", logprob=float(np.log(0.1))),
+                NS(token="<|im_end|>", logprob=float(np.log(0.05)))])])
+            return NS(choices=[NS(message=NS(content="yes"), logprobs=lp)],
+                      usage=NS(prompt_tokens=100, completion_tokens=1))
+
+    fake_client = NS(chat=NS(completions=FakeCompletions()))
+    monkeypatch.setattr(serve.vqa, "make_client", lambda *a, **k: fake_client)
+    monkeypatch.setattr(serve, "Scorer", lambda s: type("S", (), {"device": "cpu"})())
+    monkeypatch.setattr(serve.gallery.ScanEngine, "probe_scan",
+                        lambda self, it, im: {"verdict": "normal", "p_tumor": 0.2,
+                                              "latency_ms": 1.0, "model": "probe/x"})
+    settings = serve.Settings(fake=False, encoder="fake", tiles_dir=env["tiles"],
+                              results_dir=tmp_path / "results", gallery_dir=gdir)
+    assert settings.scan_model is None and settings.vqa_model == serve.vqa.DEFAULT_VQA_MODEL
+    with TestClient(serve.create_app(settings)) as c:
+        assert c.get("/health").json()["scan_backend"] == "pathvqa-lora"
+        r = c.post("/scan", json={"id": "scan_1"})
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["decided_by"] == "vlm" and j["verdict"] == "tumor"
+        assert abs(j["p_tumor"] - 0.8 / 0.9) < 1e-9
+        assert abs(j["confidence"] - j["p_tumor"]) < 1e-12
+        assert j["model"] == serve.vqa.DEFAULT_VQA_MODEL
+        v = j["vlm"]
+        assert v["verdict"] == "tumor" and v["answer"] == "yes"
+        assert v["question"] == "is tumor present?" and v["source"] == "pathvqa-lora"
+        assert v["model"] == serve.vqa.DEFAULT_VQA_MODEL and v["latency_ms"] >= 0
+        assert v["cost_usd"] > 0
+        assert j["probe"]["verdict"] == "normal" and j["probe"]["p_tumor"] == 0.2
+        assert j["cached"] is False
+        assert c.post("/scan", json={"id": "scan_1"}).json()["cached"] is True
+    kw = calls[0]
+    assert kw["logprobs"] is True and kw["top_logprobs"] == 5 and kw["max_tokens"] == 4
+    assert kw["extra_body"] == {"reasoning_effort": "none"}
+    assert kw["messages"][0]["content"] == serve.vqa.SYSTEM_PROMPT
+    assert kw["messages"][1]["content"][1]["text"] == "is tumor present?"
+    assert len(calls) == 1                                     # cached second call
+
+    # no logprobs in the response -> 0.95 for "yes"; a VQA failure -> probe decides
+    class NoLP(FakeCompletions):
+        def create(self, **kw):
+            return NS(choices=[NS(message=NS(content="No"), logprobs=None)], usage=None)
+
+    fake_client.chat.completions = NoLP()
+    eng = serve.gallery.ScanEngine(settings, lambda: None)
+    assert eng.scan_backend() == "pathvqa-lora" and not eng.vlm_enabled()
+    im = tissue_image(224, 224)
+    j = eng.scan({"id": "scan_3", "label": 0, "label_name": "normal"}, im)
+    assert j["decided_by"] == "vlm" and j["verdict"] == "normal" and j["p_tumor"] == 0.05
+    assert j["confidence"] == 0.95 and j["vlm"]["answer"] == "No"
+
+    def boom(image, model, api_key):
+        raise RuntimeError("deployment gone")
+
+    j2 = eng.scan({"id": "scan_3", "label": 0, "label_name": "normal"}, im, vqa_fn=boom)
+    assert j2["decided_by"] == "probe" and "deployment gone" in j2["vlm"]["error"]
+    assert j2["vlm"]["source"] == "pathvqa-lora" and j2["model"] == "probe/x"
 
 
 def test_vqa_with_gallery_id(gallery_client):
