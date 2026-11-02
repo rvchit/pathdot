@@ -19,7 +19,7 @@ from PIL import Image
 from pathfrontier import config
 
 DEFAULT_VQA_MODEL = ("accounts/rvchit/models/pathvqa-qwen3p5-9b"
-                     "#accounts/rvchit/deployments/pathvqa-q35-9b-ft")
+                     "#accounts/rvchit/deployments/pathvqa-q35-9b-ft2")
 
 # Exactly the fine-tuning / eval prompt from pathvqa_kit/scripts/common.py. Do not edit.
 SYSTEM_PROMPT = (

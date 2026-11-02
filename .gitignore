@@ -38,3 +38,5 @@ pathvqa_kit/**/__pycache__/
 
 # demo gallery is small and curated: keep it in git
 !data/demo_gallery/
+!results/camelyon17/
+!results/pathvqa/
