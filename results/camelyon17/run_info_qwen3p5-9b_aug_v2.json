@@ -1,0 +1,12 @@
+{
+  "model": "accounts/ramaratnam-rishi-272/models/qwen3p5-9b-camelyon17-aug (Qwen3.5-9B + LoRA, round 2)",
+  "training": {"job": "i3nc1m5s", "method": "LoRA SFT rank 16, 2 epochs", "examples": 7600, "tumor_by_slide": {"20": 27, "21": 10, "27": 110, "28": 1826, "29": 1827}, "augmentation": "one random dihedral transform per image", "minutes": 21, "cost_usd_est": 0.53},
+  "accelerator": "NVIDIA_H200_141GB", "accelerator_count": 1, "precision": "FP8",
+  "setup": "Round 2: tumor examples from slides 28 and 29 (round 1: 99% slide 28) plus random flips/rotations; prompt v2, 224 px, thinking off. Inference ran 4 rotations per tile; the dev set (1,000 held-out slide-29 tiles) chose the single (unrotated) view and cutoff 0.778, applied once to test.",
+  "deploy_ready_s": 315,
+  "wall_s": 296,
+  "gpu_minutes": 1.23,
+  "gpu_rate_usd_per_hour": 10.0,
+  "gpu_rate_note": "wall_s/GPU minutes are for the 4-view test run (24,000 calls); a single-view run would take about a quarter (~1.2 min). gpu_minutes is set to that single-view equivalent. Whole deployment: 12.5 min, ~$2.08 at the same high rate.",
+  "date": "2026-11-02"
+}

@@ -38,6 +38,7 @@ def main(
     no_thinking: bool = typer.Option(False, help="reasoning_effort=none for hybrid-reasoning models"),
     ids_file: str = typer.Option("", help="CSV with a tile_id column: classify only these tiles"),
     out_name: str = typer.Option("", help="name for the preds file (default: the model id)"),
+    tta: int = typer.Option(1, help="average over 1-4 rotations of each tile"),
 ) -> None:
     if not model:
         if dry_run:
@@ -49,7 +50,7 @@ def main(
         prompt_version=prompt_version, provider=provider, stage="vlm_ft", dry_run=dry_run,
         seed=seed, results_dir=Path(results_dir) if results_dir else config.RESULTS_DIR,
         out_name=out_name or model, no_thinking=no_thinking,
-        ids_file=Path(ids_file) if ids_file else None,
+        ids_file=Path(ids_file) if ids_file else None, tta=tta,
     )
     typer.echo(f"stage=vlm_ft model={model}")
     typer.echo(f"wrote {out}")

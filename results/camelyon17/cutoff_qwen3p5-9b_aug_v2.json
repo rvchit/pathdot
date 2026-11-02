@@ -1,0 +1,16 @@
+{
+  "mode": "single view",
+  "cutoff": 0.777470538610617,
+  "dev": {
+    "single view": {
+      "cutoff": 0.777470538610617,
+      "acc": 0.979,
+      "auroc": 0.997736
+    },
+    "4-view average": {
+      "cutoff": 0.6874728830121906,
+      "acc": 0.978,
+      "auroc": 0.997752
+    }
+  }
+}

@@ -745,11 +745,13 @@ def run_split(model: str, dataset: str, split: str, limit: int | None, concurren
               prompt_version: str, provider: str, stage: str, dry_run: bool = False,
               seed: int = 0, results_dir: Path | None = None, cache_dir: Path | None = None,
               out_name: str | None = None, no_thinking: bool = False,
-              ids_file: Path | None = None) -> tuple[Path, dict]:
+              ids_file: Path | None = None, tta: int = 1) -> tuple[Path, dict]:
     """Load tiles, classify, write preds JSONL, return (path, summary).
 
     ``ids_file``: CSV with a ``tile_id`` column; only those tiles of the split are classified
     (e.g. the slide-29 dev tiles of the camelyon17 training pool).
+    ``tta``: classify each tile as 1-4 rotations (0/90/180/270 degrees) and average the class
+    probabilities; tokens and cost are summed over the views.
     """
     results_dir = results_dir or config.RESULTS_DIR
     cache_dir = cache_dir or config.CACHE_DIR
@@ -784,11 +786,48 @@ def run_split(model: str, dataset: str, split: str, limit: int | None, concurren
     cache_path = cache_dir / f"vlm_{safe}_{dataset}_{split}_{prompt_version}.jsonl"
     if dry_run:
         cache_path = cache_dir / f"vlm_dryrun_{safe}_{dataset}_{split}_{prompt_version}.jsonl"
-    preds = asyncio.run(classify_many(records, dataset, cfg, prompt_version, cache_path,
+    views = tta_views(records, tta) if tta > 1 else records
+    preds = asyncio.run(classify_many(views, dataset, cfg, prompt_version, cache_path,
                                       stage=stage, split=split, client=client))
+    if tta > 1:
+        preds = merge_tta(preds, records, tta)
     out = schema.preds_path(out_name or cfg.model, split, results_dir)
     schema.write_predictions(preds, out)
     return out, summarize(preds)
+
+
+TTA_ROTATIONS = (None, Image.Transpose.ROTATE_90, Image.Transpose.ROTATE_180,
+                 Image.Transpose.ROTATE_270)
+
+
+def tta_views(records: list, n: int) -> list:
+    """Each record as ``n`` rotated copies with tile ids ``<id>@rot<k>``."""
+    if not 1 <= n <= len(TTA_ROTATIONS):
+        raise ValueError(f"tta must be 1..{len(TTA_ROTATIONS)}, got {n}")
+    return [_Tile(f"{r.tile_id}@rot{k}", r.image if op is None else r.image.transpose(op), r.label)
+            for r in records for k, op in enumerate(TTA_ROTATIONS[:n])]
+
+
+def merge_tta(view_preds: list[schema.Prediction], records: list, n: int) -> list[schema.Prediction]:
+    """Average the per-view probabilities back into one prediction per original tile."""
+    by_id: dict[str, list[schema.Prediction]] = {}
+    for p in view_preds:
+        by_id.setdefault(p.tile_id.rsplit("@rot", 1)[0], []).append(p)
+    out = []
+    for r in records:
+        vs = by_id[r.tile_id]
+        prob = [sum(v.y_prob[i] for v in vs) / len(vs) for i in range(len(vs[0].y_prob))]
+        first = vs[0]
+        extra = {**first.extra, "tta": n,
+                 "tokens_in": sum(v.extra.get("tokens_in", 0) for v in vs),
+                 "tokens_out": sum(v.extra.get("tokens_out", 0) for v in vs),
+                 "parse_error": any(v.extra.get("parse_error") for v in vs),
+                 "view_probs": [v.y_prob for v in vs]}
+        out.append(first.model_copy(update={
+            "tile_id": r.tile_id, "y_prob": prob, "y_pred": max(range(len(prob)), key=prob.__getitem__),
+            "confidence": max(prob), "latency_ms": sum(v.latency_ms for v in vs) / len(vs),
+            "cost_usd": sum(v.cost_usd for v in vs), "extra": extra}))
+    return out
 
 
 def _load_records(dataset: str, split: str, limit: int | None, seed: int, dry_run: bool) -> list:

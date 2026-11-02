@@ -1,0 +1,170 @@
+{
+  "model": "accounts/ramaratnam-rishi-272/models/qwen3p5-9b-camelyon17-aug (Qwen3.5-9B + LoRA, round 2)",
+  "preds_file": "results/camelyon17/preds_qwen3p5-9b_aug_v2_final_test.jsonl",
+  "run_info": {
+    "model": "accounts/ramaratnam-rishi-272/models/qwen3p5-9b-camelyon17-aug (Qwen3.5-9B + LoRA, round 2)",
+    "training": {
+      "job": "i3nc1m5s",
+      "method": "LoRA SFT rank 16, 2 epochs",
+      "examples": 7600,
+      "tumor_by_slide": {
+        "20": 27,
+        "21": 10,
+        "27": 110,
+        "28": 1826,
+        "29": 1827
+      },
+      "augmentation": "one random dihedral transform per image",
+      "minutes": 21,
+      "cost_usd_est": 0.53
+    },
+    "accelerator": "NVIDIA_H200_141GB",
+    "accelerator_count": 1,
+    "precision": "FP8",
+    "setup": "Round 2: tumor examples from slides 28 and 29 (round 1: 99% slide 28) plus random flips/rotations; prompt v2, 224 px, thinking off. Inference ran 4 rotations per tile; the dev set (1,000 held-out slide-29 tiles) chose the single (unrotated) view and cutoff 0.778, applied once to test.",
+    "deploy_ready_s": 315,
+    "wall_s": 296,
+    "gpu_minutes": 1.23,
+    "gpu_rate_usd_per_hour": 10.0,
+    "gpu_rate_note": "wall_s/GPU minutes are for the 4-view test run (24,000 calls); a single-view run would take about a quarter (~1.2 min). gpu_minutes is set to that single-view equivalent. Whole deployment: 12.5 min, ~$2.08 at the same high rate.",
+    "date": "2026-11-02"
+  },
+  "overall": {
+    "n": 6000,
+    "n_tumor": 3000,
+    "n_normal": 3000,
+    "accuracy": 0.8581666666666666,
+    "balanced_accuracy": 0.8581666666666666,
+    "sensitivity": 0.7573333333333333,
+    "specificity": 0.959,
+    "precision": 0.948643006263048,
+    "f1": 0.8422613531047266,
+    "auroc": 0.929747611111111,
+    "confusion": {
+      "tp": 2272,
+      "fn": 728,
+      "fp": 123,
+      "tn": 2877
+    },
+    "accuracy_95ci": [
+      0.8491094810682134,
+      0.86676550137636
+    ],
+    "parse_errors": 0,
+    "api_errors": 0,
+    "predicted_tumor_rate": 0.39916666666666667
+  },
+  "per_slide": {
+    "22": {
+      "n": 1947,
+      "n_tumor": 1494,
+      "n_normal": 453,
+      "accuracy": 0.7195685670261941,
+      "balanced_accuracy": 0.8149618340913323,
+      "sensitivity": 0.6365461847389559,
+      "specificity": 0.9933774834437086,
+      "precision": 0.9968553459119497,
+      "f1": 0.7769607843137255,
+      "auroc": 0.987189375603961,
+      "confusion": {
+        "tp": 951,
+        "fn": 543,
+        "fp": 3,
+        "tn": 450
+      }
+    },
+    "23": {
+      "n": 1281,
+      "n_tumor": 929,
+      "n_normal": 352,
+      "accuracy": 0.9633099141295862,
+      "balanced_accuracy": 0.9579413959291516,
+      "sensitivity": 0.9698600645855759,
+      "specificity": 0.9460227272727273,
+      "precision": 0.9793478260869565,
+      "f1": 0.9745808545159546,
+      "auroc": 0.9851838487131813,
+      "confusion": {
+        "tp": 901,
+        "fn": 28,
+        "fp": 19,
+        "tn": 333
+      }
+    },
+    "24": {
+      "n": 1215,
+      "n_tumor": 56,
+      "n_normal": 1159,
+      "accuracy": 0.9209876543209876,
+      "balanced_accuracy": 0.49124090965117717,
+      "sensitivity": 0.017857142857142856,
+      "specificity": 0.9646246764452114,
+      "precision": 0.023809523809523808,
+      "f1": 0.02040816326530612,
+      "auroc": 0.6556760754344879,
+      "confusion": {
+        "tp": 1,
+        "fn": 55,
+        "fp": 41,
+        "tn": 1118
+      }
+    },
+    "25": {
+      "n": 843,
+      "n_tumor": 335,
+      "n_normal": 508,
+      "accuracy": 0.9347568208778173,
+      "balanced_accuracy": 0.9448495710424256,
+      "sensitivity": 0.9940298507462687,
+      "specificity": 0.8956692913385826,
+      "precision": 0.8626943005181347,
+      "f1": 0.9237170596393898,
+      "auroc": 0.9829239628628511,
+      "confusion": {
+        "tp": 333,
+        "fn": 2,
+        "fp": 53,
+        "tn": 455
+      }
+    },
+    "26": {
+      "n": 714,
+      "n_tumor": 186,
+      "n_normal": 528,
+      "accuracy": 0.8501400560224089,
+      "balanced_accuracy": 0.7245540078201368,
+      "sensitivity": 0.46236559139784944,
+      "specificity": 0.9867424242424242,
+      "precision": 0.9247311827956989,
+      "f1": 0.6164874551971327,
+      "auroc": 0.8099442000651678,
+      "confusion": {
+        "tp": 86,
+        "fn": 100,
+        "fp": 7,
+        "tn": 521
+      }
+    }
+  },
+  "tokens": {
+    "input_total": 3168000,
+    "output_total": 57883,
+    "input_per_image": 528.0,
+    "output_per_image": 9.647166666666667,
+    "total_per_image": 537.6471666666666
+  },
+  "cost": {
+    "token_price_proxy_usd": 2.9032947,
+    "gpu_usd_estimate": 0.20500000000000002,
+    "gpu_usd_per_1k_images": 0.03416666666666667
+  },
+  "speed": {
+    "latency_mean_ms": 570.9790568551398,
+    "latency_p50_ms": 506.0504113716888,
+    "latency_p95_ms": 971.4590891831906,
+    "latency_max_ms": 3492.005354244611,
+    "wall_s": 296,
+    "images_per_s": 20.27027027027027,
+    "output_tokens_per_s": 195.55067567567568
+  }
+}

@@ -31,5 +31,24 @@ Weak spots of the fine-tuned model: slides 24 and 26 (tumor sensitivity 23% and 
 tumor patches are rare (56 and 186 tiles); the Phikon probe also misses most tumors on slide 26
 (41%) but not on slide 24 (82%).
 
-Per-model reports: `baseline_qwen2p5-vl-32b.md`, `baseline_qwen3p5-9b_zeroshot_v1.md`,
+## Round 2 (no meaningful change)
+
+Training set rebuilt so tumor examples come from slides 28 and 29 (1,826 / 1,827) instead of 99%
+slide 28, with one random flip/rotation per image; same size (7,600), same LoRA recipe (job
+`i3nc1m5s`, 21 min, ~$0.53). Inference ran 4 rotations per tile; the dev set (1,000 slide-29 tiles
+held out of training) chose the single unrotated view and cutoff 0.778, applied once to test.
+
+| | round 1 | round 2 |
+|---|---|---|
+| accuracy | 85.5% | 85.8% (84.9-86.7) |
+| sensitivity / specificity | 78.1% / 92.8% | 75.7% / 95.9% |
+| AUROC | 0.943 | 0.930 (4-view average: 0.937) |
+
+Paired McNemar round 2 vs round 1: 335 vs 313 discordant tiles, p = 0.41, i.e. no detectable
+difference. Likely cause: slide 29 is now both in training and the dev set, so the model is very
+confident on dev (AUROC 0.998) and the dev-chosen cutoff (0.78) is too strict for the unseen test
+slides; it trades tumor sensitivity for specificity. Slide 24 tumor sensitivity fell to 2%
+(1 of 56). Averaging over rotations did not help on dev (97.8% vs 97.9%).
+
+Per-model reports: `finetuned_qwen3p5-9b_aug_v2.md`, `baseline_qwen2p5-vl-32b.md`, `baseline_qwen3p5-9b_zeroshot_v1.md`,
 `baseline_qwen3p5-9b_zeroshot_v2.md`, `finetuned_qwen3p5-9b_v2.md`, `baseline_phikon-v2_probe.md`.

@@ -267,3 +267,21 @@ def test_p_tumor_from_logprobs_handles_split_tokens():
     assert vc.p_tumor_from_logprobs(lp(("normal", 0.0), ("t", -9.25))) < 0.001
     assert vc.p_tumor_from_logprobs(lp(("foo", 0.0))) is None
     assert vc.p_tumor_from_logprobs(None) is None
+
+
+def test_tta_views_and_merge():
+    from pathfrontier import schema
+
+    img = Image.new("RGB", (4, 4))
+    img.putpixel((0, 0), (255, 0, 0))
+    recs = [vc._Tile("camelyon17:test:7", img, 1)]
+    views = vc.tta_views(recs, 4)
+    assert [v.tile_id for v in views] == [f"camelyon17:test:7@rot{k}" for k in range(4)]
+    assert views[1].image.getpixel((0, 3)) == (255, 0, 0)  # 90 deg counter-clockwise
+    preds = [schema.Prediction(tile_id=v.tile_id, dataset="camelyon17", split="test", y_true=1,
+                               y_prob=[1 - p, p], y_pred=int(p > 0.5), model="m", cost_usd=0.01,
+                               extra={"tokens_in": 10, "tokens_out": 1})
+             for v, p in zip(views, (0.2, 0.4, 0.9, 0.9))]
+    (m,) = vc.merge_tta(preds, recs, 4)
+    assert m.tile_id == "camelyon17:test:7" and abs(m.y_prob[1] - 0.6) < 1e-9 and m.y_pred == 1
+    assert m.extra["tokens_in"] == 40 and abs(m.cost_usd - 0.04) < 1e-9
