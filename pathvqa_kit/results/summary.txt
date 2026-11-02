@@ -1,0 +1,20 @@
+scoring 1000 questions answered by every model
+
+model                            yes/no acc           open exact          open recall        overall exact  p50 s  p95 s out tok
+qwen3vl8b_base             67.1 (62.9-71.1)        1.2 (0.4-2.2)        5.8 (4.4-7.7)     34.1 (31.2-36.9)   0.30   0.45     2.8
+qwen3vl8b_8shot            62.1 (57.7-66.3)        1.8 (0.8-3.0)        5.8 (4.2-7.6)     31.9 (29.1-34.6)   0.77   1.98     3.2
+qwen35_9b_base             75.2 (71.3-79.0)        5.2 (3.4-7.2)        7.6 (5.7-9.9)     40.1 (37.3-43.1)   0.31   0.51     3.1
+qwen35_9b_ft               90.6 (88.2-93.2)     27.5 (24.0-31.5)     32.5 (28.8-36.3)     59.0 (56.1-62.0)   0.47   1.00     2.9
+
+paired McNemar test on overall exact match (n01 = first right/second wrong):
+  qwen3vl8b_base vs qwen3vl8b_8shot: diff -2.2 pts, n01=57, n10=35, p=0.0280
+  qwen3vl8b_base vs qwen35_9b_base: diff +6.0 pts, n01=57, n10=117, p=0.0000
+  qwen3vl8b_base vs qwen35_9b_ft: diff +24.9 pts, n01=20, n10=269, p=0.0000
+  qwen3vl8b_8shot vs qwen35_9b_base: diff +8.2 pts, n01=61, n10=143, p=0.0000
+  qwen3vl8b_8shot vs qwen35_9b_ft: diff +27.1 pts, n01=18, n10=289, p=0.0000
+  qwen35_9b_base vs qwen35_9b_ft: diff +18.9 pts, n01=24, n10=213, p=0.0000
+
+
+fine-tune job yqqs9b85: base qwen3p5-9b, LoRA rank 16, 1 epoch, lr 1e-4, 8000 train / 500 val
+steps 250; train loss 1.321 -> 0.513; eval loss 1.108 -> 0.571
+wall time 13:08 -> 13:21 (14 min)

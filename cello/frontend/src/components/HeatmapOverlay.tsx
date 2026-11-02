@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import OpenSeadragon from "openseadragon";
 import { Heatmap, HeatmapTile } from "../api/mlApi";
-import { GroundTruth } from "../api/slidesApi";
+import { DziInfo, GroundTruth } from "../api/slidesApi";
 
 export interface OverlayOptions {
   showHeatmap: boolean;
@@ -11,11 +11,35 @@ export interface OverlayOptions {
 
 export const DEFAULT_OVERLAY: OverlayOptions = { showHeatmap: true, opacity: 1, showGroundTruth: false };
 
+/** A DZI tile the user clicked: `level`/`x`/`y` are DZI tile indices (tile size 256). */
+export interface TileSelection {
+  level: number;
+  x: number;
+  y: number;
+  /** The heatmap tile at that position, when a heatmap exists at the same level. */
+  tile?: HeatmapTile | null;
+}
+
 interface Props {
   viewer: OpenSeadragon.Viewer | null;
   heatmap: Heatmap | null;
   groundTruth: GroundTruth | null;
   options: OverlayOptions;
+  /** Slide geometry; needed to select tiles when there is no heatmap yet. */
+  dzi?: DziInfo | null;
+  selected?: TileSelection | null;
+  /** Fired on click (pin) with the tile, and with null when unpinned / clicked outside the slide. */
+  onSelectTile?: (sel: TileSelection | null) => void;
+}
+
+const DZI_TILE = 256;
+
+/** Image-pixel rectangle of a DZI tile at `level` (scale = 2^(maxLevel-level)). */
+function dziTileRect(dzi: DziInfo, sel: TileSelection): { x: number; y: number; w: number; h: number } {
+  const size = (dzi.tileSize || DZI_TILE) * Math.pow(2, dzi.maxLevel - sel.level);
+  const x = sel.x * size;
+  const y = sel.y * size;
+  return { x, y, w: Math.min(size, dzi.width - x), h: Math.min(size, dzi.height - y) };
 }
 
 /** Colour per decision. Alpha is the contract's base value, scaled by the opacity slider. */
@@ -49,11 +73,15 @@ export function tileRect(hm: Heatmap, t: HeatmapTile): { x: number; y: number; w
  * to the slide while panning and zooming. pointer-events are off so OSD keeps gestures;
  * hover/click are read from the viewer's own DOM element instead.
  */
-const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options }) => {
+const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options, dzi, selected, onSelectTile }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const hoverRef = useRef<Hover | null>(null);
   hoverRef.current = hover;
+  const selectRef = useRef(onSelectTile);
+  selectRef.current = onSelectTile;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -96,7 +124,7 @@ const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options
         }
       }
       const hv = hoverRef.current;
-      if (hv) {
+      if (hv && !hv.pinned) {
         const r = tileRect(heatmap, hv.tile);
         const a = toEl(r.x, r.y);
         const b = toEl(r.x + r.w, r.y + r.h);
@@ -104,6 +132,19 @@ const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options
         ctx.lineWidth = 2;
         ctx.strokeRect(a.x + 1, a.y + 1, b.x - a.x - 2, b.y - a.y - 2);
       }
+    }
+
+    // Selected tile (for the assistant): thin accent rectangle, works with or without a heatmap.
+    if (selected && dzi) {
+      const r = dziTileRect(dzi, selected);
+      const a = toEl(r.x, r.y);
+      const b = toEl(r.x + r.w, r.y + r.h);
+      ctx.strokeStyle = "rgba(110, 168, 254, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(a.x + 1, a.y + 1, b.x - a.x - 2, b.y - a.y - 2);
+      ctx.strokeStyle = "rgba(17, 19, 23, 0.8)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(a.x + 2.5, a.y + 2.5, b.x - a.x - 5, b.y - a.y - 5);
     }
 
     if (groundTruth && options.showGroundTruth) {
@@ -118,7 +159,7 @@ const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options
         ctx.strokeRect(a.x + inset, a.y + inset, b.x - a.x - 2 * inset, b.y - a.y - 2 * inset);
       }
     }
-  }, [viewer, heatmap, groundTruth, options]);
+  }, [viewer, heatmap, groundTruth, options, dzi, selected]);
 
   // Redraw on every viewport change.
   useEffect(() => {
@@ -141,23 +182,31 @@ const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options
     draw();
   }, [draw, hover]);
 
-  // Hover + click -> tooltip. Read from the viewer element so OSD gestures keep working.
+  // Hover + click -> tooltip + tile selection. Read from the viewer element so OSD gestures keep working.
   useEffect(() => {
-    if (!viewer || !heatmap) {
+    if (!viewer) {
       setHover(null);
       return;
     }
     const el = viewer.element;
+    const toImage = (px: number, py: number) => {
+      if (viewer.world.getItemCount() === 0) return null;
+      const img = viewer.viewport.viewerElementToImageCoordinates(new OpenSeadragon.Point(px, py));
+      const w = heatmap?.width ?? dzi?.width ?? 0;
+      const h = heatmap?.height ?? dzi?.height ?? 0;
+      if (img.x < 0 || img.y < 0 || img.x >= w || img.y >= h) return null;
+      return img;
+    };
     const findTile = (clientX: number, clientY: number): { tile: HeatmapTile | null; px: number; py: number } => {
       const rect = el.getBoundingClientRect();
       const px = clientX - rect.left;
       const py = clientY - rect.top;
-      if (viewer.world.getItemCount() === 0) return { tile: null, px, py };
-      const img = viewer.viewport.viewerElementToImageCoordinates(new OpenSeadragon.Point(px, py));
+      if (!heatmap) return { tile: null, px, py };
+      const img = toImage(px, py);
+      if (!img) return { tile: null, px, py };
       const size = heatmap.tile_size * heatmap.scale;
       const tx = Math.floor(img.x / size);
       const ty = Math.floor(img.y / size);
-      if (img.x < 0 || img.y < 0 || img.x >= heatmap.width || img.y >= heatmap.height) return { tile: null, px, py };
       const tile = heatmap.tiles.find((t) => t.x === tx && t.y === ty) ?? null;
       return { tile, px, py };
     };
@@ -177,16 +226,36 @@ const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options
     const onClick = (ev: OpenSeadragon.CanvasClickEvent) => {
       if (!ev.quick) return;
       const pos = ev.position;
-      const img = viewer.viewport.viewerElementToImageCoordinates(new OpenSeadragon.Point(pos.x, pos.y));
-      const size = heatmap.tile_size * heatmap.scale;
-      const tile = heatmap.tiles.find((t) => t.x === Math.floor(img.x / size) && t.y === Math.floor(img.y / size)) ?? null;
-      if (!tile) {
+      const img = toImage(pos.x, pos.y);
+      if (!img) {
         setHover(null);
+        selectRef.current?.(null);
         return;
       }
-      const cur = hoverRef.current;
-      if (cur?.pinned && cur.tile === tile) setHover({ ...cur, pinned: false });
-      else setHover({ tile, px: pos.x, py: pos.y, pinned: true });
+      // Heatmap present: select at the heatmap's level so the thumbnail matches the painted cell.
+      // Otherwise: full-resolution DZI tile, floor(img / 256).
+      let next: TileSelection;
+      if (heatmap) {
+        const size = heatmap.tile_size * heatmap.scale;
+        const x = Math.floor(img.x / size);
+        const y = Math.floor(img.y / size);
+        next = { level: heatmap.level, x, y, tile: heatmap.tiles.find((t) => t.x === x && t.y === y) ?? null };
+      } else if (dzi) {
+        const size = dzi.tileSize || DZI_TILE;
+        next = { level: dzi.maxLevel, x: Math.floor(img.x / size), y: Math.floor(img.y / size), tile: null };
+      } else {
+        return;
+      }
+      const cur = selectedRef.current;
+      const same = !!cur && cur.level === next.level && cur.x === next.x && cur.y === next.y;
+      if (same) {
+        setHover(null);
+        selectRef.current?.(null);
+        return;
+      }
+      if (next.tile) setHover({ tile: next.tile, px: pos.x, py: pos.y, pinned: true });
+      else setHover(null);
+      selectRef.current?.(next);
     };
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerleave", onLeave);
@@ -196,7 +265,12 @@ const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options
       el.removeEventListener("pointerleave", onLeave);
       viewer.removeHandler("canvas-click", onClick);
     };
-  }, [viewer, heatmap, options.showHeatmap]);
+  }, [viewer, heatmap, dzi, options.showHeatmap]);
+
+  // Selection cleared from outside (slide change) -> drop the pinned tooltip too.
+  useEffect(() => {
+    if (!selected && hoverRef.current?.pinned) setHover(null);
+  }, [selected]);
 
   const tip = hover && options.showHeatmap ? hover : null;
   const style = tip ? DECISION_STYLE[tip.tile.decision] : null;
@@ -225,7 +299,7 @@ const HeatmapOverlay: React.FC<Props> = ({ viewer, heatmap, groundTruth, options
             <strong>{tip.tile.routed_to}</strong>
           </div>
           {tip.tile.reason && <div className="tt-reason">{tip.tile.reason}</div>}
-          {tip.pinned && <div className="tt-hint">click again to unpin</div>}
+          {tip.pinned && <div className="tt-hint">selected for the assistant · click again to unpin</div>}
         </div>
       )}
     </>

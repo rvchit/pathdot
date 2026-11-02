@@ -5,7 +5,7 @@ import "@annotorious/openseadragon/annotorious-openseadragon.css";
 import { BACKEND_URL, errorMessage } from "../api/client";
 import { DziInfo, getDzi, createComment } from "../api/slidesApi";
 import { Heatmap } from "../api/mlApi";
-import HeatmapOverlay, { OverlayOptions } from "./HeatmapOverlay";
+import HeatmapOverlay, { OverlayOptions, TileSelection } from "./HeatmapOverlay";
 import { GroundTruth } from "../api/slidesApi";
 
 interface ImageViewerProps {
@@ -15,13 +15,15 @@ interface ImageViewerProps {
   overlay: OverlayOptions;
   onDzi?: (info: DziInfo | null) => void;
   onCommentSaved?: () => void;
+  selectedTile?: TileSelection | null;
+  onSelectTile?: (sel: TileSelection | null) => void;
 }
 
 type DrawTool = "rectangle" | "polygon";
 
 const OSD_PREFIX = "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.0/images/";
 
-const OSDViewer: React.FC<ImageViewerProps> = ({ imageId, heatmap, groundTruth, overlay, onDzi, onCommentSaved }) => {
+const OSDViewer: React.FC<ImageViewerProps> = ({ imageId, heatmap, groundTruth, overlay, onDzi, onCommentSaved, selectedTile, onSelectTile }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const annotatorRef = useRef<OpenSeadragonAnnotator | null>(null);
   const [viewer, setViewer] = useState<OpenSeadragon.Viewer | null>(null);
@@ -180,7 +182,7 @@ const OSDViewer: React.FC<ImageViewerProps> = ({ imageId, heatmap, groundTruth, 
         )}
         {imageId && !dzi && !loadError && <div className="viewer-empty">Loading slide metadata…</div>}
         <div ref={containerRef} className="osd-container" />
-        <HeatmapOverlay viewer={viewer} heatmap={heatmap} groundTruth={groundTruth} options={overlay} />
+        <HeatmapOverlay viewer={viewer} heatmap={heatmap} groundTruth={groundTruth} options={overlay} dzi={dzi} selected={selectedTile} onSelectTile={onSelectTile} />
       </div>
 
       {pendingAnnotation && (

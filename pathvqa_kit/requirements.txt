@@ -1,0 +1,7 @@
+datasets
+pillow
+imagehash
+numpy
+requests
+openai
+anthropic

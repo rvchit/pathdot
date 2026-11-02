@@ -51,6 +51,20 @@ only. The heatmap JSON (`docs/CONTRACTS.md` §8) is drawn on a single canvas tha
 on every OpenSeadragon `update-viewport` event: tile `(x, y)` covers
 `[x*tile_size*scale, y*tile_size*scale, tile_size*scale, tile_size*scale]` image pixels.
 
+## Ask the pathology assistant (PathVQA)
+
+Second AI feature in the sidebar: click any tile on the slide (with or without a heatmap) and the
+**Ask the pathology assistant** panel shows a 96 px thumbnail of that tile, its triage verdict when
+one exists, preset question chips ("Is tumor present?", "What tissue is this?", ...) and a free-text
+box. Answers come from the fine-tuned PathVQA model via `POST /ml/vqa`
+(`{"image_id","level","x","y","question"}` → `{"answer","model","latency_ms","cost_usd",...}`);
+`GET /ml/health` reports the model under `vqa` (null = panel shows "assistant unavailable").
+Tile selection: with a heatmap the click selects the heatmap-level cell; without one it selects the
+full-resolution DZI tile (`floor(image_px / 256)`, `level = maxLevel`) and outlines it in blue.
+The **impact strip** above the triage panel sums the story: tiles auto-cleared / minutes saved per
+slide (from the last triage run) and questions answered / median latency (this session).
+Deep link: `/?image=pcam_mosaic_24&triage=1&ask=1`.
+
 ## Environment variables
 
 Backend (`cello/backend/.env`, see `.env.example`):
@@ -90,7 +104,7 @@ Full reference with payloads: [`Cello_API_Documentation.md`](./Cello_API_Documen
 | GET | `/osd/tile/:imageId/:level/:x/:y` | tile bytes (404 if missing, traversal-safe) |
 | GET | `/osd/gt/:imageId` | `data/slides/<id>.gt.json` ground truth, or 404 |
 | GET/POST/DELETE | `/comments[/:imageId\|/:id]` | JSON-file comment store |
-| ALL | `/ml/*` | streaming proxy to the ML service (JSON + multipart, status passthrough) |
+| ALL | `/ml/*` | streaming proxy to the ML service (JSON + multipart, status passthrough); incl. `POST /ml/vqa` |
 | POST | `/api/upload-local` | save a slide to `UPLOAD_DIR`, reply with the tiler command |
 | GET | `/api/upload-mode` | `{"mode":"local"\|"s3"}` |
 
@@ -119,6 +133,8 @@ src/api/mlApi.ts         startSlideJob, pollJob, getHeatmap, predictTile, runSli
 src/components/OSDviewer.tsx      viewer built from /osd/dzi, Annotorious drawing, comment modal
 src/components/HeatmapOverlay.tsx canvas overlay + hover/click tooltip
 src/components/TriagePanel.tsx    thresholds, run/poll/progress, summary stats, overlay toggles
+src/components/AskPanel.tsx       PathVQA question panel for the selected tile (POST /ml/vqa)
+src/components/ImpactStrip.tsx    2-stat "hours saved" banner (triage summary + Q&A session stats)
 src/components/FileUpload.tsx     slide list from /osd/images + local/S3 upload
 src/components/comments.tsx       list/delete comments
 ```

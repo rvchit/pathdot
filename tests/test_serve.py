@@ -213,3 +213,125 @@ def test_module_app_importable():
     """`uvicorn pathfrontier.serve:app` target exists (lifespan loads models lazily)."""
     assert serve.app.title == "pathfrontier inference"
     assert Path(serve.Settings.from_env().tiles_dir).name == "tiles"
+
+
+def test_vqa_fake_mode(client, env):
+    """/vqa works offline in fake mode for both body shapes, caches, and 404s on missing tiles."""
+    assert client.get("/health").json()["vqa"] == "fake/vqa"
+
+    # Tile shape; level null -> max level (10 for the 600x400 synth slide).
+    body = {"image_id": "synth", "level": None, "x": 1, "y": 0, "question": "is tumor present?"}
+    r = client.post("/vqa", json=body)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert set(j) >= {"answer", "question", "model", "latency_ms", "cost_usd", "tokens_in",
+                      "tokens_out", "image_id", "level", "x", "y", "cached"}
+    assert j["answer"] in {"yes", "no"}
+    assert j["question"] == "is tumor present?"
+    assert j["model"] == "fake/vqa" and j["cost_usd"] == 0.0
+    assert (j["image_id"], j["level"], j["x"], j["y"]) == ("synth", 10, 1, 0)
+    assert j["cached"] is False
+
+    # Same request again -> served from the cache.
+    r2 = client.post("/vqa", json=body)
+    assert r2.status_code == 200 and r2.json()["cached"] is True
+    assert {k: v for k, v in r2.json().items() if k != "cached"} == \
+        {k: v for k, v in j.items() if k != "cached"}
+
+    # Non yes/no question -> canned description; explicit level works too.
+    r3 = client.post("/vqa", json={"image_id": "synth", "level": 9, "x": 0, "y": 0,
+                                   "question": "what does this image show?"})
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["answer"] == "tumor tissue" and r3.json()["level"] == 9
+    assert r3.json()["cached"] is False
+
+    # Raw base64 and data-URL image bodies.
+    im = tissue_image(96, 96, seed=5)
+    b64 = base64.b64encode(png_bytes(im)).decode()
+    r4 = client.post("/vqa", json={"image_b64": b64, "question": "does it look malignant?"})
+    assert r4.status_code == 200, r4.text
+    j4 = r4.json()
+    assert j4["answer"] in {"yes", "no"} and j4["image_id"] is None and j4["x"] is None
+    assert j4["cached"] is False
+    r5 = client.post("/vqa", json={"image_b64": "data:image/png;base64," + b64,
+                                   "question": "does it look malignant?"})
+    assert r5.status_code == 200 and r5.json()["cached"] is True
+    assert r5.json()["answer"] == j4["answer"]
+
+    # Errors: unknown image / tile -> 404, bad bodies -> 400.
+    assert client.post("/vqa", json={"image_id": "missing", "x": 0, "y": 0,
+                                     "question": "q?"}).status_code == 404
+    assert client.post("/vqa", json={"image_id": "synth", "level": 10, "x": 9, "y": 9,
+                                     "question": "q?"}).status_code == 404
+    assert client.post("/vqa", json={"image_id": "synth", "level": 99, "x": 0, "y": 0,
+                                     "question": "q?"}).status_code == 404
+    assert client.post("/vqa", json={"question": "q?"}).status_code == 400
+    assert client.post("/vqa", json={"image_id": "synth", "x": 0, "y": 0,
+                                     "question": "  "}).status_code == 400
+    assert client.post("/vqa", json={"image_id": "synth", "x": 0,
+                                     "question": "q?"}).status_code == 400
+    assert client.post("/vqa", json={"image_b64": "bm90YW5pbWFnZQ==",
+                                     "question": "q?"}).status_code == 400
+    assert client.post("/vqa", json={"image_id": "../etc", "x": 0, "y": 0,
+                                     "question": "q?"}).status_code == 400
+
+
+def test_vqa_not_configured_and_upstream_error(env, monkeypatch):
+    """Real mode without a key -> 503 vqa_not_configured; upstream failure -> 502."""
+    monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
+    monkeypatch.setattr(serve.config, "FIREWORKS_API_KEY", "")
+    settings = serve.Settings(fake=False, encoder="fake", tiles_dir=env["tiles"],
+                              results_dir=env["root"] / "results_vqa")
+    # Avoid loading a real encoder/probe: only the /vqa and /health routes are exercised.
+    monkeypatch.setattr(serve, "Scorer", lambda s: type("S", (), {"device": "cpu"})())
+    app = serve.create_app(settings)
+    with TestClient(app) as c:
+        assert c.get("/health").json()["vqa"] is None
+        r = c.post("/vqa", json={"image_id": "synth", "x": 0, "y": 0, "question": "is it?"})
+        assert r.status_code == 503 and r.json()["detail"] == {"error": "vqa_not_configured"}
+
+    monkeypatch.setenv("FIREWORKS_API_KEY", "test-key")
+
+    def boom(image, question, settings):
+        raise serve.vqa.VQAError("APIConnectionError: nope")
+
+    monkeypatch.setattr(serve, "_vqa_answer", boom)
+    with TestClient(app) as c:
+        assert c.get("/health").json()["vqa"] == serve.vqa.DEFAULT_VQA_MODEL
+        r = c.post("/vqa", json={"image_id": "synth", "x": 0, "y": 0, "question": "is it?"})
+        assert r.status_code == 502 and "nope" in r.json()["detail"]
+
+
+def test_vlm_classify_prompt_version(env, monkeypatch):
+    """_vlm_classify passes v1/v2 + no_thinking through to vlm_client.classify_tile."""
+    from pathfrontier import vlm_client
+
+    seen = {}
+
+    def fake_classify(image, dataset, cfg, prompt_version="v1", client=None):
+        seen.update(cfg=cfg, prompt_version=prompt_version)
+        return {"label": 1, "probs": [0.1, 0.9], "reason": "", "raw": "Tumor\n",
+                "latency_ms": 1.0, "cost_usd": 0.0}
+
+    monkeypatch.setattr(vlm_client, "classify_tile", fake_classify)
+    im = tissue_image(96, 96)
+    s1 = serve.Settings(fake=True, encoder="fake", vlm_model="m", vlm_prompt_version="v1",
+                        vlm_no_thinking=False)
+    r1 = serve._vlm_classify(im, s1)
+    assert seen["prompt_version"] == "v1" and "extra_body" not in seen["cfg"].extra
+    assert "logprobs" not in seen["cfg"].extra and r1["reason"] == ""
+
+    s2 = serve.Settings(fake=True, encoder="fake", vlm_model="m", vlm_prompt_version="v2")
+    r2 = serve._vlm_classify(im, s2)
+    cfg = seen["cfg"]
+    assert seen["prompt_version"] == "v2"
+    assert cfg.extra["extra_body"] == {"reasoning_effort": "none"}
+    assert cfg.extra["logprobs"] is True and cfg.max_tokens == vlm_client.V2_MAX_TOKENS
+    assert r2["reason"] == "tumor" and r2["probs"] == [0.1, 0.9]
+
+    monkeypatch.setenv("PATHFRONTIER_VLM_PROMPT_VERSION", "v2")
+    monkeypatch.setenv("PATHFRONTIER_VLM_NO_THINKING", "0")
+    monkeypatch.setenv("PATHFRONTIER_VQA_MODEL", "acct/models/x")
+    s = serve.Settings.from_env()
+    assert s.vlm_prompt_version == "v2" and s.vlm_no_thinking is False
+    assert s.vqa_model == "acct/models/x"

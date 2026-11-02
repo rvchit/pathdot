@@ -27,3 +27,11 @@ results/demo/*.jsonl
 !tiles/.gitkeep
 !data/.gitkeep
 !cache/.gitkeep
+
+# pathvqa_kit: data, SFT files, env and venv stay local
+pathvqa_kit/.venv-kit/
+pathvqa_kit/.env
+pathvqa_kit/data/
+pathvqa_kit/fireworks/
+pathvqa_kit/fireworks_small/
+pathvqa_kit/**/__pycache__/

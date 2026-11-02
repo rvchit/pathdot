@@ -79,7 +79,30 @@ export interface MlHealth {
   encoder?: string;
   probe?: string;
   vlm?: string | null;
+  /** PathVQA assistant model id, or null when the /vqa endpoint is not configured. */
+  vqa?: string | null;
   device?: string;
+}
+
+/** POST /ml/vqa — ask the fine-tuned PathVQA model a free-text question about one DZI tile. */
+export interface VqaRequest {
+  image_id: string;
+  /** DZI level; null = full resolution. x/y are tile indices at that level (tile size 256). */
+  level: number | null;
+  x: number;
+  y: number;
+  question: string;
+}
+
+export interface VqaResponse {
+  answer: string;
+  question: string;
+  model: string;
+  latency_ms: number;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+  cached?: boolean;
 }
 
 export async function mlHealth(): Promise<MlHealth> {
@@ -106,6 +129,11 @@ export async function predictTile(file: Blob, filename = "tile.jpeg"): Promise<T
   const form = new FormData();
   form.append("file", file, filename);
   const { data } = await api.post<TilePrediction>("/ml/predict/tile", form);
+  return data;
+}
+
+export async function askTile(req: VqaRequest): Promise<VqaResponse> {
+  const { data } = await api.post<VqaResponse>("/ml/vqa", req, { timeout: 90_000 });
   return data;
 }
 

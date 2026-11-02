@@ -5,6 +5,8 @@
     POST /predict/slide     JSON {"image_id", "level", "max_tiles", "low", "high", "fallback"}
     GET  /jobs/{job_id}
     GET  /heatmap/{image_id}
+    POST /vqa               JSON {"image_id", "level"|null, "x", "y", "question"}
+                            or   {"image_b64", "question"}  (PathVQA fine-tune, see vqa.py)
 
 Configuration (environment):
 
@@ -14,9 +16,17 @@ Configuration (environment):
     PATHFRONTIER_TILES_DIR   local DZI pyramids (default tiles/)
     PATHFRONTIER_VLM_MODEL   optional Fireworks model id; used for the uncertain band only when
                              FIREWORKS_API_KEY is also set, otherwise band tiles -> "pathologist"
+    PATHFRONTIER_VLM_PROMPT_VERSION  prompt for the band VLM: "v1" (default; JSON label/confidence/
+                             reason) or "v2" (fine-tuned one-word tumor/normal classifier: p_tumor
+                             from first-token logprobs, `reason` = the one-word answer)
+    PATHFRONTIER_VLM_NO_THINKING  "1" (default) sends reasoning_effort="none" so hybrid-reasoning
+                             models (Qwen3.5) answer instead of thinking; "0" leaves it to the model
+    PATHFRONTIER_VQA_MODEL   Fireworks model id for POST /vqa (default vqa.DEFAULT_VQA_MODEL, the
+                             PathVQA fine-tune); needs FIREWORKS_API_KEY unless PATHFRONTIER_FAKE=1
     PATHFRONTIER_LOW/HIGH    cascade thresholds (defaults 0.01 / 0.90)
     PATHFRONTIER_BG_SAT      mean HSV saturation below which a tile is glass/background (default 0.04)
-    PATHFRONTIER_FAKE=1      "fake" encoder + deterministic random probe-like scorer, no downloads
+    PATHFRONTIER_FAKE=1      "fake" encoder + deterministic random probe-like scorer, no downloads;
+                             /vqa answers offline with a canned answer
     PATHFRONTIER_VLM_MAX_TILES  cap on VLM calls per slide job (default 200)
 
 Slide `level`: an int DZI level, "max" (full res), "auto" (max_level - 2, ~1 um/px for a 40x
@@ -28,6 +38,7 @@ Run: `python -m pathfrontier.serve` (or scripts/serve.py).
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -35,6 +46,7 @@ import os
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,7 +57,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from pathfrontier import config, dzi
+from pathfrontier import config, dzi, vqa
 from pathfrontier.schema import CLASSES, DEFAULT_COST_PER_1K, POSITIVE_INDEX, save_json
 
 log = logging.getLogger("pathfrontier.serve")
@@ -54,6 +66,7 @@ PROBE_COST_PER_TILE = DEFAULT_COST_PER_1K["probe"] / 1000.0
 BACKGROUND_SAT_THRESHOLD = float(os.getenv("PATHFRONTIER_BG_SAT", "0.04"))  # mean HSV saturation below this => glass
 BACKGROUND_VAL_THRESHOLD = 0.80   # ...and mean brightness above this (white glass)
 EMBED_BATCH = 64
+VQA_CACHE_SIZE = 512
 
 
 # --------------------------------------------------------------------------------------
@@ -67,6 +80,9 @@ class Settings:
     tiles_dir: Path = field(default_factory=lambda: config.ROOT / "tiles")
     results_dir: Path = field(default_factory=lambda: config.RESULTS_DIR)
     vlm_model: str | None = None
+    vlm_prompt_version: str = "v1"
+    vlm_no_thinking: bool = True
+    vqa_model: str | None = vqa.DEFAULT_VQA_MODEL
     low: float = 0.01
     high: float = 0.90
     fake: bool = False
@@ -78,7 +94,8 @@ class Settings:
         dataset = os.getenv("PATHFRONTIER_DATASET", "pcam")
         probe = os.getenv("PATHFRONTIER_PROBE")
         probe_path = Path(probe) if probe else config.RESULTS_DIR / f"probe_{enc}_{dataset}.joblib"
-        fake = os.getenv("PATHFRONTIER_FAKE", "0").lower() in {"1", "true", "yes"}
+        truthy = {"1", "true", "yes"}
+        fake = os.getenv("PATHFRONTIER_FAKE", "0").lower() in truthy
         return cls(
             encoder="fake" if fake else enc,
             dataset=dataset,
@@ -86,6 +103,9 @@ class Settings:
             tiles_dir=Path(os.getenv("PATHFRONTIER_TILES_DIR", config.ROOT / "tiles")),
             results_dir=config.RESULTS_DIR,
             vlm_model=os.getenv("PATHFRONTIER_VLM_MODEL") or None,
+            vlm_prompt_version=os.getenv("PATHFRONTIER_VLM_PROMPT_VERSION", "v1").strip() or "v1",
+            vlm_no_thinking=os.getenv("PATHFRONTIER_VLM_NO_THINKING", "1").lower() in truthy,
+            vqa_model=os.getenv("PATHFRONTIER_VQA_MODEL", vqa.DEFAULT_VQA_MODEL).strip() or None,
             low=float(os.getenv("PATHFRONTIER_LOW", "0.01")),
             high=float(os.getenv("PATHFRONTIER_HIGH", "0.90")),
             fake=fake,
@@ -202,14 +222,90 @@ def vlm_enabled(settings: Settings) -> bool:
     return bool(settings.vlm_model) and bool(os.getenv("FIREWORKS_API_KEY", config.FIREWORKS_API_KEY))
 
 
+def _vlm_config(settings: Settings):
+    """VLMConfig for the band model, mirroring vlm_client.run_split's prompt-version handling."""
+    from pathfrontier import vlm_client
+
+    cfg = vlm_client.VLMConfig(model=settings.vlm_model)
+    if settings.vlm_prompt_version in vlm_client.ONE_WORD_PROMPTS:
+        cfg.min_image_px, cfg.max_tokens = vlm_client.V2_IMAGE_PX, vlm_client.V2_MAX_TOKENS
+        cfg.extra.update({"logprobs": True, "top_logprobs": vlm_client.V2_TOP_LOGPROBS})
+    if settings.vlm_no_thinking:  # hybrid-reasoning models (Qwen3.5) otherwise think, not answer
+        cfg.extra["extra_body"] = {"reasoning_effort": "none"}
+    return cfg
+
+
 def _vlm_classify(image, settings: Settings) -> dict:
-    """classify_tile wrapper; returns the vlm_client dict. Monkeypatched in tests."""
+    """classify_tile wrapper; returns the vlm_client dict. Monkeypatched in tests.
+
+    v1: unchanged baseline JSON prompt. v2 (fine-tuned one-word classifier): p_tumor comes from
+    the first-token logprobs (classify_tile already folds them into `probs`) and `reason` is the
+    model's one-word answer.
+    """
     try:
-        from pathfrontier.vlm_client import VLMConfig, classify_tile
+        from pathfrontier.vlm_client import classify_tile
     except ImportError as e:
         raise RuntimeError(f"VLM fallback requested but vlm_client unavailable: {e}") from e
-    cfg = VLMConfig(model=settings.vlm_model)
-    return classify_tile(image, settings.dataset, cfg)
+    cfg = _vlm_config(settings)
+    r = classify_tile(image, settings.dataset, cfg, prompt_version=settings.vlm_prompt_version)
+    if settings.vlm_prompt_version != "v1":
+        word = (r.get("raw") or "").strip().split()
+        r["reason"] = word[0].strip(".,!\"'").lower() if word else (r.get("reason") or None)
+    return r
+
+
+# --------------------------------------------------------------------------------------
+# PathVQA (lazy; see vqa.py)
+# --------------------------------------------------------------------------------------
+def vqa_enabled(settings: Settings) -> bool:
+    if settings.fake:
+        return True
+    return bool(settings.vqa_model) and bool(
+        os.getenv("FIREWORKS_API_KEY", config.FIREWORKS_API_KEY))
+
+
+def vqa_model_name(settings: Settings) -> str | None:
+    if not vqa_enabled(settings):
+        return None
+    return "fake/vqa" if settings.fake else settings.vqa_model
+
+
+def _vqa_answer(image, question: str, settings: Settings) -> dict:
+    """vqa.answer_question wrapper; raises vqa.VQAError. Monkeypatched in tests."""
+    return vqa.answer_question(image, question, model=settings.vqa_model or vqa.DEFAULT_VQA_MODEL,
+                               fake=settings.fake)
+
+
+class VQARequest(BaseModel):
+    question: str
+    image_id: str | None = None
+    level: int | None = None
+    x: int | None = None
+    y: int | None = None
+    image_b64: str | None = None
+
+
+class _VQACache:
+    """Tiny thread-safe LRU so repeated demo clicks on the same tile+question are instant."""
+
+    def __init__(self, size: int = VQA_CACHE_SIZE):
+        self.size = size
+        self._d: OrderedDict[tuple, dict] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: tuple) -> dict | None:
+        with self._lock:
+            v = self._d.get(key)
+            if v is not None:
+                self._d.move_to_end(key)
+            return v
+
+    def put(self, key: tuple, value: dict) -> None:
+        with self._lock:
+            self._d[key] = value
+            self._d.move_to_end(key)
+            while len(self._d) > self.size:
+                self._d.popitem(last=False)
 
 
 # --------------------------------------------------------------------------------------
@@ -522,6 +618,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "encoder": settings.encoder,
             "probe": "fake" if settings.fake else str(settings.probe),
             "vlm": settings.vlm_model if vlm_enabled(settings) else None,
+            "vlm_prompt_version": settings.vlm_prompt_version,
+            "vqa": vqa_model_name(settings),
             "device": sc.device if sc is not None else config.device(),
             "dataset": settings.dataset,
             "classes": settings.classes,
@@ -626,6 +724,79 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/images")
     def list_images():
         return {"images": dzi.list_image_ids(settings.tiles_dir)}
+
+    vqa_cache = _VQACache()
+    app.state.vqa_cache = vqa_cache
+
+    @app.post("/vqa")
+    def vqa_endpoint(req: VQARequest):
+        from PIL import Image
+
+        question = (req.question or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="missing question")
+        if not vqa_enabled(settings):
+            raise HTTPException(status_code=503, detail={"error": "vqa_not_configured"})
+        model = vqa_model_name(settings)
+
+        image_id = level = x = y = None
+        if req.image_id is not None:
+            if req.x is None or req.y is None:
+                raise HTTPException(status_code=400, detail="image_id needs x and y")
+            image_id = _safe_id(req.image_id)
+            dzi_file = dzi.find_dzi(settings.tiles_dir, image_id)
+            if dzi_file is None:
+                raise HTTPException(status_code=404, detail=f"no DZI pyramid for {image_id!r} "
+                                    f"in {settings.tiles_dir}")
+            info = dzi.parse_dzi(dzi_file)
+            level = info["max_level"] if req.level is None else int(req.level)
+            x, y = int(req.x), int(req.y)
+            key = (model, image_id, level, x, y, question)
+            hit = vqa_cache.get(key)
+            if hit is not None:
+                return dict(hit, cached=True)
+            tile = dzi.tile_path(settings.tiles_dir, image_id, level, x, y, info["format"])
+            if level < 0 or level > info["max_level"] or not tile.is_file():
+                raise HTTPException(status_code=404, detail=f"no tile {image_id}/{level}/{x}_{y}")
+            with Image.open(tile) as im:
+                image = im.convert("RGB")
+                image.load()
+        elif req.image_b64:
+            b64 = req.image_b64.strip()
+            if b64.startswith("data:") and "," in b64:
+                b64 = b64.split(",", 1)[1]
+            try:
+                data = base64.b64decode(b64)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail="image_b64 is not base64") from e
+            image = _decode_image_bytes(data)
+            key = (model, "b64:" + hashlib.sha1(data).hexdigest(), None, None, None, question)
+            hit = vqa_cache.get(key)
+            if hit is not None:
+                return dict(hit, cached=True)
+        else:
+            raise HTTPException(status_code=400, detail="send {image_id, level, x, y, question} "
+                                "or {image_b64, question}")
+
+        try:
+            r = _vqa_answer(image, question, settings)
+        except vqa.VQAError as e:
+            raise HTTPException(status_code=502, detail=f"vqa upstream error: {e}") from e
+        out = {
+            "answer": r["answer"],
+            "question": question,
+            "model": r.get("model", model),
+            "latency_ms": float(r.get("latency_ms", 0.0)),
+            "cost_usd": float(r.get("cost_usd", 0.0)),
+            "tokens_in": int(r.get("tokens_in", 0)),
+            "tokens_out": int(r.get("tokens_out", 0)),
+            "image_id": image_id,
+            "level": level,
+            "x": x,
+            "y": y,
+        }
+        vqa_cache.put(key, out)
+        return dict(out, cached=False)
 
     return app
 

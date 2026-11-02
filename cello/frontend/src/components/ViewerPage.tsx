@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import ImageViewer from "./OSDviewer";
 import Sidebar from "./sidebar";
-import { DEFAULT_OVERLAY, OverlayOptions } from "./HeatmapOverlay";
+import { DEFAULT_OVERLAY, OverlayOptions, TileSelection } from "./HeatmapOverlay";
+import { AskEntry } from "./AskPanel";
 import { Heatmap } from "../api/mlApi";
 import { DziInfo, GroundTruth, getGroundTruth } from "../api/slidesApi";
 
@@ -16,11 +17,16 @@ const ViewerPage: React.FC<ViewerPageProps> = ({ selectedImageId, setSelectedIma
   const [groundTruth, setGroundTruth] = useState<GroundTruth | null>(null);
   const [overlay, setOverlay] = useState<OverlayOptions>(DEFAULT_OVERLAY);
   const [commentsRefreshKey, setCommentsRefreshKey] = useState(0);
+  // Tile the user clicked on the slide (drives the "Ask the pathology assistant" panel).
+  const [selectedTile, setSelectedTile] = useState<TileSelection | null>(null);
+  // Session-wide Q&A history (feeds the AskPanel list and the ImpactStrip stats).
+  const [askHistory, setAskHistory] = useState<AskEntry[]>([]);
 
   // Reset per-slide state when the slide changes.
   useEffect(() => {
     setHeatmap(null);
     setGroundTruth(null);
+    setSelectedTile(null);
     setOverlay((o) => ({ ...o, showGroundTruth: false }));
   }, [selectedImageId]);
 
@@ -53,6 +59,8 @@ const ViewerPage: React.FC<ViewerPageProps> = ({ selectedImageId, setSelectedIma
           overlay={overlay}
           onDzi={setDzi}
           onCommentSaved={() => setCommentsRefreshKey((k) => k + 1)}
+          selectedTile={selectedTile}
+          onSelectTile={setSelectedTile}
         />
       </main>
       <Sidebar
@@ -64,6 +72,9 @@ const ViewerPage: React.FC<ViewerPageProps> = ({ selectedImageId, setSelectedIma
         onOverlay={setOverlay}
         hasGroundTruth={!!groundTruth && groundTruth.cells.length > 0}
         commentsRefreshKey={commentsRefreshKey}
+        selectedTile={selectedTile}
+        askHistory={askHistory}
+        onAsk={(e) => setAskHistory((h) => [e, ...h])}
       />
     </div>
   );
